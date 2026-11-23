@@ -6,7 +6,7 @@ derived from it — the animation frames in `cuadros/` (Wawi 1's `wawi/`),
 `wawi.png`, `wawi_face.png`, `wawi_menubar.png`, `Wawi.icns`, and
 `docs/wawi.gif` at the Wawi 1 repository root — are licensed under
 **Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)**,
-not under the MIT license that covers the code.
+not under the Apache License 2.0 that covers the code.
 
 You may copy, adapt and share them for non-commercial purposes, with credit
 ("Wawi, drawing by Marcos Senatori's niece") and an indication of any changes.
