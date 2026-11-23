@@ -1,0 +1,49 @@
+# Autoarreglo: cuando Wawi nota un problema, se arma un arreglo con Opus,
+# lo prueba detrás de compuertas que no puede tocar y te lo PROPONE. Nunca
+# lo aplica sola. La referencia completa está en docs/AUTOARREGLO.md.
+#
+# Instalarlo:
+#   cargo install --path crates/wawi-autoarreglo --locked
+#   cp -r plugins/autoarreglo ~/.wawi2/plugins/autoarreglo
+# Viene APAGADO: para que se arregle hay que poner activo = true y repo en
+# ~/.wawi2/autoarreglo/config.toml (ver la guía). Apagado igual anota los
+# problemas, que no cuesta nada.
+#
+# `wawi-autoarreglo` tiene que estar en el PATH de Wawi (~/.cargo/bin), o
+# poné el camino entero en command.
+
+description = "Wawi anota sus problemas, se arma arreglos probados y te los propone."
+# aplicar_arreglo hace git en tu repo: puede tardar unos segundos.
+timeout = "60s"
+expose = "listed"
+
+[server]
+command = "wawi-autoarreglo"
+args = ["mcp"]
+
+# reportar_problema es "read" a propósito: solo escribe en la cola local
+# (cola/incidentes), nunca toca código. Así no pide confirmación.
+[tools.reportar_problema]
+kind = "read"
+[tools.arreglos]
+kind = "read"
+[tools.contar_arreglo]
+kind = "read"
+# Aplicar escribe un commit en tu repo: siempre pregunta.
+[tools.aplicar_arreglo]
+kind = "act"
+confirm = true
+description = "aplicar el arreglo como un solo commit en tu rama actual"
+# Descartar no pregunta (es decir que no), pero la iniciativa no puede.
+[tools.descartar_arreglo]
+kind = "act"
+confirm = false
+description = "descartar el arreglo y no volver a intentarlo"
+[tools.revertir_arreglo]
+kind = "act"
+confirm = true
+description = "deshacer el arreglo con un commit nuevo"
+[tools.compilar]
+kind = "act"
+confirm = true
+description = "compilar a Wawi de nuevo, en segundo plano"

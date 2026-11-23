@@ -1,0 +1,33 @@
+# El carácter: Wawi aprende cómo le gusta a su dueño que le hable (el
+# trato: estilo, no datos) y lo guarda en <home>/trato.md, que podés leer,
+# editar o borrar. La referencia completa está en docs/PERSONALIDAD.md.
+#
+# Instalarlo:
+#   cargo install --path crates/wawi-caracter --locked
+#   cp -r plugins/caracter ~/.wawi2/plugins/caracter
+#
+# `wawi-caracter` tiene que estar en el PATH de Wawi (~/.cargo/bin), o poné
+# el camino entero en command.
+
+description = "El trato: cómo le gusta al dueño que Wawi le hable."
+timeout = "10s"
+expose = "listed"
+# El aprendizaje viene APAGADO. Con false, Wawi igual sigue el trato.md que
+# ya exista y contesta «¿cómo me tratás?», pero no aprende nada nuevo.
+# Corré el banco (docs/PERSONALIDAD.md) y, si te convence, poné true.
+observa_charla = false
+
+[server]
+command = "wawi-caracter"
+args = ["mcp"]
+
+[tools.trato]
+kind = "read"
+# Sacar una regla es deshacer algo tuyo: no pregunta. La iniciativa no puede.
+[tools.quitar_regla]
+kind = "act"
+confirm = false
+description = "sacar una regla del trato"
+[tools.olvidar_trato]
+kind = "act"
+description = "borrar todo el trato aprendido"

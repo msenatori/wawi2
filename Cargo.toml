@@ -1,0 +1,8 @@
+[workspace]
+resolver = "3"
+members = ["crates/wawi-core", "crates/wawi-memory", "crates/wawi-brain-claude", "crates/wawi-app", "crates/wawi-audio-mac", "crates/wawi-stt-parakeet", "crates/wawi-tts-kokoro", "crates/wawi-body", "crates/wawi-tools", "crates/wawi-plugins", "crates/wawi-instinto", "crates/wawi-autoarreglo", "crates/wawi-caracter", "crates/wawi-curiosidad"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+publish = false

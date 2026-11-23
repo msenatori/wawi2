@@ -1,0 +1,26 @@
+[package]
+name = "wawi-stt-parakeet"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+wawi-core = { path = "../wawi-core" }
+# Parakeet TDT on ONNX Runtime. `onnx` only: no whisper.cpp, no remote APIs.
+# ort downloads a prebuilt ONNX Runtime at build time and links it statically.
+transcribe-rs = { version = "=0.3.12", default-features = false, features = ["onnx"] }
+# Pinned here only so the resolver cannot drift to a newer prerelease.
+ort = { version = "=2.0.0-rc.12", default-features = true }
+hound = "=3.5.1"
+serde_json = "=1.0.149"
+sha2 = "=0.10.9"
+ureq = "=3.5.0"
+
+[target.'cfg(unix)'.dependencies]
+libc = "=0.2.190"
+
+# Measures speed, latency, memory and WER on a folder of WAVs.
+[[bin]]
+name = "stt-bench"
+path = "src/bin/stt_bench.rs"
+doc = false

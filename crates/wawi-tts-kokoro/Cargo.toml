@@ -1,0 +1,23 @@
+[package]
+name = "wawi-tts-kokoro"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+wawi-core = { path = "../wawi-core" }
+# Kokoro-82M on ONNX Runtime. The same ort as wawi-stt-parakeet (through
+# transcribe-rs), so the binary links one ONNX Runtime.
+ort = { version = "=2.0.0-rc.12", default-features = true }
+hound = "=3.5.1"
+sha2 = "=0.10.9"
+ureq = "=3.5.0"
+
+[target.'cfg(unix)'.dependencies]
+libc = "=0.2.190"
+
+# Writes a WAV of what Wawi would say, and measures latency and memory.
+[[bin]]
+name = "tts-say"
+path = "src/bin/tts_say.rs"
+doc = false

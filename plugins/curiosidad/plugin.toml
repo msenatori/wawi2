@@ -1,0 +1,51 @@
+# La curiosidad: de vez en cuando, porque sí, Wawi mira la pantalla y dice
+# algo corto y juguetón. También cuando le preguntás «¿qué te parece esto?».
+# La referencia completa está en docs/PERSONALIDAD.md.
+#
+# Instalarlo:
+#   cargo install --path crates/wawi-curiosidad --locked
+#   cp -r plugins/curiosidad ~/.wawi2/plugins/curiosidad
+#
+# Hace falta el permiso de Grabación de pantalla para la app desde la que
+# corrés Wawi (por ejemplo, la Terminal). Sin él no mira y lo dice.
+# Para apagarlo entero: enabled = false. Para que no mire: decile «no mires
+# la pantalla».
+
+description = "Mira la pantalla de vez en cuando, por curiosidad, y opina."
+# Una mirada (captura, achicarla y una llamada a claude -p que la mira
+# dentro del plugin) tarda unos 2,5 s; 25 s es el tope con un reintento.
+timeout = "25s"
+expose = "listed"
+# Solo para saber CUÁNDO habló el dueño (nunca mira apenas hablaste). El
+# texto de la charla se descarta sin leerlo ni guardarlo.
+observa_charla = true
+
+[server]
+command = "wawi-curiosidad"
+args = ["mcp"]
+
+[tools.mirar_pantalla]
+kind = "read"
+# El dueño decide; no pregunta. La iniciativa no puede tocarlas.
+[tools.no_mirar]
+kind = "act"
+confirm = false
+description = "dejar de mirar la pantalla"
+[tools.mirar_de_nuevo]
+kind = "act"
+confirm = false
+description = "volver a mirar la pantalla"
+
+# La mirada espontánea. Cada 20 minutos pregunta si es buen momento: casi
+# siempre dice que no. Como mucho 2 por día, con 3 horas entre una y otra,
+# a una hora al azar, nunca de 23 a 8, nunca con una app a pantalla
+# completa, una reunión, la cámara prendida, la pantalla bloqueada, el
+# protector de pantalla o si no hay nadie, y nunca apenas hablaste.
+# Prioridad baja: si en ese momento hay charla, no espera; se pierde.
+[[watch]]
+name = "mirar"
+every = "20m"
+tool = "momento"
+say = "Te dio curiosidad qué está haciendo el dueño. Mirá la pantalla con curiosidad__mirar_pantalla, con espontanea en true, y decile UN comentario corto, juguetón y curioso, de una o dos frases (podés usar el comentario sugerido, con tus palabras). Puede ser una pregunta. Nada de consejos, sermones ni descripciones largas, y nada privado. Si no la podés mirar, o te dice que no hay nada simpático, no digas nada."
+cooldown = "3h"
+priority = "baja"

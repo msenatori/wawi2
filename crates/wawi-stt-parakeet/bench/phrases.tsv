@@ -1,0 +1,26 @@
+# name	voice (macOS `say -v`)	text: what the voice says, also the reference transcript
+# Synthetic voices: macOS has no Rioplatense voice, so these are Mexican and
+# Spain Spanish voices reading Rioplatense phrases. Numbers are written as words
+# because that is what is spoken; an engine that writes "7" counts an error.
+01_hola	Paulina	Hola Wawi, ¿cómo andás?
+02_musica	Mónica	Poné música tranquila.
+03_hora	Eddy (Spanish (Mexico))	¿Qué hora es?
+04_lluvia	Flo (Spanish (Spain))	Che, ¿va a llover mañana?
+05_acordate	Reed (Spanish (Mexico))	Acordate de comprar leche y pan.
+06_laburo	Sandy (Spanish (Spain))	Mañana tengo laburo temprano, despertame a las siete.
+07_dale	Paulina	Sí, dale.
+08_mejor_no	Mónica	No, mejor no.
+09_para	Eddy (Spanish (Mexico))	Pará.
+10_mensaje	Flo (Spanish (Spain))	Mandale un mensaje a Martín que llego en veinte minutos.
+11_cuenta	Reed (Spanish (Mexico))	¿Cuánto es doscientos cincuenta por cuatro?
+12_deuda	Sandy (Spanish (Spain))	Anotá que le debo tres mil quinientos pesos a Lucía.
+13_codigo	Paulina	Abrí el archivo y revisá el código.
+14_agenda	Mónica	¿Qué tenés en la agenda para el jueves?
+15_volumen	Eddy (Spanish (Mexico))	Bajá el volumen un poco, está re fuerte.
+16_receta	Flo (Spanish (Spain))	Buscame una receta de empanadas salteñas.
+17_doctora	Reed (Spanish (Mexico))	Recordame llamar a la doctora Fernández el martes a las diez y media.
+18_partido	Sandy (Spanish (Spain))	Che, ¿viste el partido de Boca anoche? Qué bajón.
+19_luces	Paulina	Apagá las luces del living.
+20_capital	Mónica	¿Cuál es la capital de Uruguay?
+21_asado	Eddy (Spanish (Mexico))	Acordate que el sábado viene mi vieja a comer, así que necesito que me armes una lista de compras con carne para el asado, chorizos, ensalada y algo de postre, y que me avises el viernes a la tarde.
+22_mails	Flo (Spanish (Spain))	Estuve laburando toda la semana en el proyecto nuevo y no me dio el tiempo para nada, así que fijate si podés resumirme los mails importantes y decime cuáles tengo que contestar hoy sí o sí.

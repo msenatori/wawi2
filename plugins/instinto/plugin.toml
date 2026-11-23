@@ -1,0 +1,35 @@
+# El instinto: Wawi deja algo vigilando y un proceso de fondo lo mira, sin
+# modelo, hasta que se cumple. Entonces deja un aviso en cola/hechos y Wawi
+# lo dice sola. La referencia completa está en docs/INSTINTO.md.
+#
+# Instalarlo:
+#   cargo install --path crates/wawi-instinto --locked
+#   cp -r plugins/instinto ~/.wawi2/plugins/instinto
+#
+# `wawi-instinto` tiene que estar en el PATH de Wawi (~/.cargo/bin), o poné
+# el camino entero en command.
+
+description = "Vigila cosas en segundo plano y avisa cuando pasan."
+# vigilar prueba la condición una vez, hasta 5 s.
+timeout = "10s"
+expose = "listed"
+# El observador de la charla: viene apagado. Ver docs/INSTINTO.md, «El
+# observador», antes de prenderlo.
+observa_charla = false
+
+[server]
+command = "wawi-instinto"
+args = ["mcp"]
+
+# vigilar es "read" a propósito: no cambia nada afuera, solo escribe en la
+# cola local del instinto (cola/preguntas), y así no pide confirmación.
+# Lo que vigila son solo lecturas (herramientas read, GET o un reloj).
+[tools.vigilar]
+kind = "read"
+[tools.seguimientos]
+kind = "read"
+# Cancelar no pregunta (es deshacer algo tuyo), pero la iniciativa no puede.
+[tools.cancelar_seguimiento]
+kind = "act"
+confirm = false
+description = "dejar de vigilar un seguimiento"

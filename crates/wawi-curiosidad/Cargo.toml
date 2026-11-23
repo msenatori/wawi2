@@ -1,0 +1,29 @@
+[package]
+name = "wawi-curiosidad"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+# The «curiosidad» plugin: Wawi looks at the screen now and then, because
+# she feels like it, and says one playful line about it. Also on demand
+# («¿qué te parece esto?»). An MCP stdio plugin, its own process: the look
+# is always an initiative turn through the instinct gate, never on the
+# owner's turn path. docs/PERSONALIDAD.md is the reference.
+
+[dependencies]
+# FEED_TOOL and the MCP protocol version.
+wawi-plugins = { path = "../wawi-plugins" }
+# The system clock and the `claude` program lookup.
+wawi-instinto = { path = "../wawi-instinto" }
+# Civil times, WallClock and FakeClock for tests.
+wawi-tools = { path = "../wawi-tools" }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.149"
+
+[[bin]]
+name = "wawi-curiosidad"
+path = "src/main.rs"
+
+[dev-dependencies]
+# Priority, to check the plugin's watch.
+wawi-core = { path = "../wawi-core" }

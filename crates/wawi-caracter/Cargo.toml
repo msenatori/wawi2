@@ -1,0 +1,33 @@
+[package]
+name = "wawi-caracter"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+# The «carácter» plugin: learns the TRATO (how to talk to this owner: style,
+# not facts) from the turn feed and keeps it in `<home>/trato.md`. One
+# headless model call per interesting turn, structured output only; code
+# validates every proposal. Its own process: never on Wawi's turn path.
+# docs/PERSONALIDAD.md is the reference.
+
+[dependencies]
+wawi-core = { path = "../wawi-core" }
+# trato.md: the parser and the caps the brain's side uses too.
+wawi-memory = { path = "../wawi-memory" }
+# FEED_TOOL, the MCP protocol version and the log stamp.
+wawi-plugins = { path = "../wawi-plugins" }
+# The headless `claude -p` call, the text helpers and the system clock.
+wawi-instinto = { path = "../wawi-instinto" }
+# Civil times and FakeClock for tests.
+wawi-tools = { path = "../wawi-tools" }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.149"
+
+[[bin]]
+name = "wawi-caracter"
+path = "src/main.rs"
+
+# Precision of the learner on labeled turns, with the real model.
+[[bin]]
+name = "caracter-bench"
+path = "src/bin/bench.rs"

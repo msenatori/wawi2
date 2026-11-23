@@ -1,0 +1,38 @@
+[package]
+name = "wawi-plugins"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+# The plugin host: every capability beyond the base is a plugin that speaks
+# MCP. Wawi is the MCP client; plugin tools are re-exposed through Wawi's own
+# in-process `wawi` server, so every call goes through the core's policy.
+# Threads and blocking I/O, no async, like the rest of Wawi.
+
+[dependencies]
+wawi-core = { path = "../wawi-core" }
+# The injectable wall clock (and FakeClock for tests).
+wawi-tools = { path = "../wawi-tools" }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.149"
+toml = "=1.1.6"
+# Remote MCP over streamable HTTP. Same version the speech crates use.
+ureq = "=3.5.0"
+
+[dev-dependencies]
+wawi-brain-claude = { path = "../wawi-brain-claude" }
+
+# A tiny MCP server over stdio, for tests only.
+[[bin]]
+name = "fake-mcp"
+path = "src/bin/fake_mcp.rs"
+test = false
+doc = false
+
+# The brain crate's `fake-claude`, built from the same source, so the end to
+# end test can drive a real ClaudeBrain without the real CLI. Tests only.
+[[bin]]
+name = "plugins-fake-claude"
+path = "../wawi-brain-claude/src/bin/fake_claude.rs"
+test = false
+doc = false

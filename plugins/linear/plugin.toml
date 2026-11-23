@@ -1,0 +1,75 @@
+# Plugin de Linear para Wawi 2.
+#
+# Instalarlo: copiá esta carpeta a ~/.wawi2/plugins/linear (o a
+# $WAWI2_HOME/plugins/linear) y poné tu clave en ~/.wawi2/secrets.toml:
+#
+#     LINEAR_API_KEY = "lin_api_..."
+#
+# con permisos 600 (chmod 600 ~/.wawi2/secrets.toml). La clave se crea en
+# Linear: Settings > Account > Security & access > Personal API keys.
+# Wawi la manda como "Authorization: Bearer ...", que el servidor MCP de
+# Linear acepta en lugar del login interactivo.
+#
+# Los horarios y los textos son tuyos: cambialos cuando quieras. Wawi los
+# lee al arrancar.
+
+description = "Tu rutina en Linear: el equipo Life, con una columna por día."
+# Hasta 30 s por llamada; Linear a veces tarda.
+timeout = "30s"
+# Solo las herramientas de abajo llegan al cerebro: la lista queda corta.
+expose = "listed"
+
+[server]
+url = "https://mcp.linear.app/mcp"
+headers = { Authorization = "Bearer ${LINEAR_API_KEY}" }
+
+# Lectura: Wawi las usa sin preguntar, también por su cuenta.
+[tools.list_issues]
+kind = "read"
+[tools.get_issue]
+kind = "read"
+[tools.list_issue_statuses]
+kind = "read"
+[tools.list_teams]
+kind = "read"
+[tools.list_projects]
+kind = "read"
+[tools.list_comments]
+kind = "read"
+
+# Acción: solo cuando se lo pedís, y siempre te pregunta antes.
+# La descripción es lo que Wawi dice al pedir confirmación.
+[tools.save_issue]
+kind = "act"
+confirm = true
+description = "crear, editar o mover una tarea en Linear"
+[tools.save_comment]
+kind = "act"
+confirm = true
+description = "dejar un comentario en una tarea de Linear"
+
+# Lunes a viernes a las 9: la columna de hoy del equipo Life.
+# {dia_o_finde} es Lunes, Martes, Miércoles, Jueves, Viernes, o Finde el
+# sábado y el domingo. Si la columna está vacía, Wawi no dice nada.
+[[watch]]
+name = "hoy"
+at = "lun-vie 09:00"
+tool = "list_issues"
+args = { team = "Life", state = "{dia_o_finde}", limit = 30 }
+say = "Son las tareas de hoy del dueño en Linear. Decile cuántas son y cuáles, en pocas palabras, sin leer los corchetes del proyecto salvo que ayuden. Después preguntale cuál es la tarea clave de hoy, y si no sabe, proponé una y decí por qué."
+cooldown = "20h"
+
+# El finde, más tarde y más corto.
+[[watch]]
+name = "finde"
+at = "sab 10:30"
+tool = "list_issues"
+args = { team = "Life", state = "Finde", limit = 30 }
+say = "Son las tareas del finde del dueño en Linear. Contale cuáles son en una o dos frases, sin apurarlo."
+cooldown = "20h"
+
+# Viernes a la tarde: el cierre de la semana.
+[[routine]]
+name = "cierre"
+at = "vie 18:00"
+prompt = "Es el cierre de semana del dueño. Mirá en Linear el equipo Life: lo que pasó a Done esta semana y lo que quedó en las columnas de los días. Contale en tres o cuatro frases qué salió y qué no, y preguntale si quiere mover algo a la semana que viene. No muevas nada vos: si hace falta, proponelo."

@@ -1,0 +1,19 @@
+[package]
+name = "wawi-body"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+# Wawi's body: the mascot on screen and the menu bar item. The logic (state
+# to animation, the speech bubble, where she stands, the menu) is pure and
+# builds everywhere; each OS draws it with its own backend (macOS: AppKit).
+
+[dependencies]
+wawi-core = { path = "../wawi-core" }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Same objc2 family as wawi-audio-mac.
+dispatch2 = "=0.3.1"
+objc2 = "=0.6.5"
+objc2-foundation = { version = "=0.3.2", default-features = false, features = ["std", "NSArray", "NSAttributedString", "NSDate", "NSDictionary", "NSEnumerator", "NSGeometry", "NSObject", "NSRunLoop", "NSString", "NSTimer", "NSURL", "NSAffineTransform", "NSValue", "NSData"] }
+objc2-app-kit = { version = "=0.3.2", default-features = false, features = ["std", "objc2-core-foundation", "NSAccessibility", "NSApplication", "NSResponder", "NSRunningApplication", "NSView", "NSWindow", "NSPanel", "NSImage", "NSGraphics", "NSGraphicsContext", "NSColor", "NSScreen", "NSEvent", "NSMenu", "NSMenuItem", "NSStatusBar", "NSStatusItem", "NSStatusBarButton", "NSButton", "NSControl", "NSCell", "NSWorkspace", "NSAffineTransform", "NSBezierPath", "NSAttributedString", "NSStringDrawing", "NSFont", "NSFontDescriptor", "NSText", "NSParagraphStyle", "NSBitmapImageRep", "NSImageRep"] }

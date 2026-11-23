@@ -1,0 +1,18 @@
+[package]
+name = "wawi-brain-claude"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+wawi-core = { path = "../wawi-core" }
+wawi-memory = { path = "../wawi-memory" }
+serde_json = "=1.0.149"
+
+# A stand-in for the `claude` CLI that speaks the same stream-json protocol.
+# Only the tests run it; nothing ships it.
+[[bin]]
+name = "fake-claude"
+path = "src/bin/fake_claude.rs"
+test = false
+doc = false

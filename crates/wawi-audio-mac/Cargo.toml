@@ -1,0 +1,33 @@
+[package]
+name = "wawi-audio-mac"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+# Measures whether voice processing removes Wawi's own voice from the mic.
+[[bin]]
+name = "aec-test"
+path = "src/main.rs"
+
+# Hold right Command, speak, release: plays back what it heard.
+[[bin]]
+name = "ptt-test"
+path = "src/bin/ptt_test.rs"
+
+# Guides the owner through the speech-to-text test phrases and saves each take.
+[[bin]]
+name = "voice-record"
+path = "src/bin/voice_record.rs"
+
+[dependencies]
+wawi-core = { path = "../wawi-core" }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "=0.6.2"
+hound = "=3.5.1"
+objc2 = "=0.6.5"
+objc2-av-foundation = { version = "=0.3.2", default-features = false, features = ["std", "block2", "AVCaptureDevice", "AVMediaFormat"] }
+objc2-avf-audio = "=0.3.2"
+objc2-core-audio = "=0.3.2"
+objc2-core-foundation = "=0.3.2"
+objc2-foundation = "=0.3.2"

@@ -1,0 +1,318 @@
+# Wawi, la mascota que viene con Wawi 2. Guía del formato: docs/MASCOTAS.md
+#
+# Los dibujos son de Wawi 1 (los dibujó la sobrina del dueño) y tienen su
+# propia licencia, CC BY-NC 4.0: ver LICENSE-art.md. Los tiempos y fundidos
+# son los de Wawi 1 (wawi/mascot.py).
+
+id = "wawi"
+nombre = "Wawi"
+autor = "La sobrina de Marcos Senatori (dibujo); Wawi 1 (animación)"
+licencia = "CC BY-NC 4.0"
+version = "2.0"
+descripcion = "Una perrita dibujada a mano, con orejas que se paran cuando la escuchás."
+
+[cuadro]
+ancho = 320
+alto = 286
+ancla = [0.5, 0.0]
+escala = 0.3875          # 124 puntos de ancho en pantalla, como Wawi 1
+cabeza = [0.33, 0.92]    # su cabeza está a la izquierda
+fps = 8
+cajas = "cuadros/anchors.json"   # los cuadros de otro tamaño (caer, trepar, paracaídas) van en su caja, como en Wawi 1
+
+[iconos]
+barra = "wawi_menubar.png"
+silencio = "cuadros/muted_badge.png"
+
+[vida]
+parpadeo = "blink"
+cada_parpadeo = [2, 6]
+gestos = ["look_left", "look_right", "look_around", "yawn", "scratch", "stretch", "sniff", "wag", "tilt"]
+cada_gesto = [6, 20]
+dormir_tras = 10         # al dueño le gusta verla dormida
+dormirse = "lie_down"
+despertarse = "wake"
+toque = "hop"
+
+# --- Estados ---
+
+[animaciones.idle]
+cuadros = ["idle_a", "idle_b"]
+duraciones = [1.9, 1.7]
+fundido = 0.45
+
+[animaciones.sleeping]
+cuadros = ["sleeping", "sleeping_b"]
+duraciones = [2.3, 2.1]
+fundido = 0.8
+
+# Las orejas se paran apenas apretás la tecla, y después las para de vez en cuando.
+[animaciones.listening]
+cuadros = ["listening_b"]
+duraciones = [0.5]
+repetir = false
+siguiente = "listening_loop"
+fundido = 0.08
+
+[animaciones.listening_loop]
+cuadros = ["listening", "listening_b"]
+duraciones = [2.2, 0.5]
+fundido = 0.08
+
+[animaciones.transcribing]
+cuadros = ["tilt"]
+fundido = 0.15
+
+[animaciones.thinking]
+cuadros = ["thinking", "thinking_b"]
+duraciones = [1.6, 1.4]
+fundido = 0.25
+
+[animaciones.speaking]
+boca = ["speaking_a", "speaking_c", "speaking_b"]   # cerrada, media, abierta
+fundido = 0.045
+
+[animaciones.interrupted]
+cuadros = ["boop"]
+duraciones = [0.7]
+repetir = false
+movimiento = "retroceso"
+fundido = 0.05
+
+[animaciones.error]
+cuadros = ["shrug"]
+duraciones = [1.6]
+repetir = false
+fundido = 0.12
+
+# Sin micrófono, cada tanto baja las orejas un rato.
+[animaciones.muted]
+cuadros = ["ears_down"]
+duraciones = [3.5]
+repetir = false
+fundido = 0.3
+
+# --- Su vida mientras está quieta ---
+
+[animaciones.blink]
+cuadros = ["blink"]
+duraciones = [0.13]
+fundido = 0.04
+
+[animaciones.look_left]
+cuadros = ["look_left"]
+duraciones = [1.4]
+fundido = 0.075
+
+[animaciones.look_right]
+cuadros = ["look_right"]
+duraciones = [1.4]
+fundido = 0.075
+
+[animaciones.look_around]
+cuadros = ["look_left", "idle_a", "look_right"]
+duraciones = [0.9, 0.25, 0.9]
+fundido = 0.075
+
+[animaciones.yawn]
+cuadros = ["yawn"]
+duraciones = [1.4]
+fundido = 0.12
+descripcion = "Bosteza."
+
+[animaciones.scratch]
+cuadros = ["scratch_a", "scratch_b", "scratch_a", "scratch_b", "scratch_a", "scratch_b", "scratch_a", "scratch_b", "scratch_a"]
+duraciones = [0.11, 0.11, 0.11, 0.11, 0.11, 0.11, 0.11, 0.11, 0.25]
+fundido = 0.05
+descripcion = "Se rasca."
+
+[animaciones.stretch]
+cuadros = ["stretch"]
+duraciones = [1.6]
+fundido = 0.15
+descripcion = "Se estira."
+
+[animaciones.sniff]
+cuadros = ["sniff", "idle_a", "sniff"]
+duraciones = [0.45, 0.15, 0.7]
+fundido = 0.075
+
+[animaciones.wag]
+cuadros = ["wag_a", "wag_b", "wag_a", "wag_b", "wag_a", "wag_b", "wag_a", "wag_b", "wag_a", "wag_b"]
+fps = 6.667              # 0,15 segundos por cuadro
+fundido = 0.06
+descripcion = "Mueve la cola."
+
+[animaciones.tilt]
+cuadros = ["tilt"]
+duraciones = [1.5]
+fundido = 0.1
+
+[animaciones.hop]
+cuadros = ["happy", "jump", "happy"]
+duraciones = [0.2, 0.42, 0.4]
+movimientos = ["ninguno", "salto", "ninguno"]
+fundido = 0.075
+
+[animaciones.lie_down]
+cuadros = ["yawn"]
+duraciones = [1.3]
+fundido = 0.15
+
+[animaciones.wake]
+cuadros = ["stretch", "yawn"]
+duraciones = [1.1, 0.9]
+fundido = 0.15
+
+# --- Su cuerpo: cae, camina, trepa y baja en paracaídas ---
+# Los números son los de Wawi 1 (wawi/pet/world.py): así se sentía la gravedad.
+
+[cuerpo]
+mira = "izquierda"         # el dibujo mira a la izquierda; caminando a la derecha se da vuelta
+caminar = "walk"
+trotar = "trot"
+trepar = "climb"
+caer = "fall"              # también mientras la tenés agarrada
+aterrizar = "land"
+porrazo = "flop"
+paracaidas = "chute"
+aterrizar_paracaidas = "chute_end"
+posada = "sit_edge"        # sentada en el borde de una ventana, con las patas colgando
+gravedad = 1500            # puntos por segundo al cuadrado
+velocidad_maxima = 950     # puntos por segundo: más rápido no cae
+velocidad_caminar = 42     # más lento que el cursor a la deriva
+velocidad_trote = 130
+velocidad_trepar = 30
+velocidad_paracaidas = 75
+rebote = 0                 # Wawi no rebota: aterriza y se aplasta
+aterrizaje = 0.35          # segundos del aplastón al aterrizar
+porrazo_desde = 500        # desde una caída de 500 puntos o más, porrazo
+chance_paracaidas = 0.35   # al bajar de una ventana alta
+chance_trote = 0.1
+cuanto_camina = [8, 25]    # minutos entre paseos
+cada_trepada = 30          # minutos: trepar es raro y nunca dos veces seguidas
+cada_paracaidas = 10
+cada_trote = 5
+
+[animaciones.walk]
+cuadros = ["walk_a", "walk_b", "walk_c", "walk_d"]
+duraciones = [0.16, 0.16, 0.16, 0.16]
+movimiento = "paso"
+fundido = 0.06
+
+[animaciones.trot]
+cuadros = ["run_a", "run_b", "run_c", "run_d"]
+duraciones = [0.09, 0.09, 0.09, 0.09]
+movimiento = "galope"
+fundido = 0.04
+
+[animaciones.climb]
+cuadros = ["climb_a", "climb_b"]
+duraciones = [0.3, 0.3]
+movimiento = "trepar"
+fundido = 0.08
+
+[animaciones.fall]
+cuadros = ["fall"]
+duraciones = [1.0]
+movimiento = "tumbo"
+fundido = 0.05
+
+[animaciones.land]
+cuadros = ["land", "idle_a"]
+duraciones = [0.3, 0.15]
+movimientos = ["aplastar", "ninguno"]
+repetir = false
+fundido = 0.05
+
+[animaciones.flop]
+cuadros = ["land", "flop_back", "idle_a"]
+duraciones = [0.22, 2.0, 0.3]
+movimientos = ["aplastar", "mareo", "ninguno"]
+repetir = false
+fundido = 0.05
+
+[animaciones.chute]
+cuadros = ["chute_hang_a", "chute_hang_b"]
+duraciones = [0.6, 0.6]
+movimientos = ["vaiven_izq", "vaiven_der"]
+capa = "prop_chute"        # la tela del paracaídas, encima de ella
+capa_en = [0.0, 0.99]
+fundido = 0.08
+
+[animaciones.chute_end]
+cuadros = ["chute_land", "chute_fold"]
+duraciones = [0.7, 1.6]
+movimientos = ["aplastar", "orgullo"]
+repetir = false
+fundido = 0.1
+
+[animaciones.sit_edge]
+cuadros = ["sit_edge"]
+duraciones = [2.0]
+fundido = 0.3
+
+# --- Acciones (las puede pedir otra parte de Wawi por su nombre) ---
+
+[animaciones.welcome]
+cuadros = ["welcome_a", "welcome_b", "welcome_a", "welcome_b", "welcome_a", "welcome_b"]
+duraciones = [0.3, 0.3, 0.3, 0.3, 0.3, 0.3]
+fundido = 0.06
+descripcion = "Saluda con la pata."
+
+[animaciones.party]
+cuadros = ["happy", "happy_b", "happy", "happy_b", "happy", "happy_b", "jump", "happy"]
+duraciones = [0.16, 0.16, 0.16, 0.16, 0.16, 0.16, 0.42, 0.5]
+movimientos = ["ninguno", "ninguno", "ninguno", "ninguno", "ninguno", "ninguno", "salto", "ninguno"]
+descripcion = "Festeja: salta de alegría."
+
+[animaciones.dance]
+cuadros = ["dance_a", "dance_b", "dance_a", "dance_b", "dance_c", "dance_c", "dance_d", "dance_d", "dance_e"]
+duraciones = [0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.15, 0.15, 0.3]
+movimientos = ["ninguno", "ninguno", "ninguno", "ninguno", "ninguno", "ninguno", "ninguno", "ninguno", "salto"]
+fundido = 0.05
+descripcion = "Baila un ratito."
+
+[animaciones.coffee]
+cuadros = ["coffee"]
+duraciones = [2.5]
+fundido = 0.15
+descripcion = "Se toma un café."
+
+[animaciones.bark]
+cuadros = ["bark_a", "bark_b", "bark_a", "bark_b", "bark_a", "bark_b"]
+duraciones = [0.17, 0.17, 0.17, 0.17, 0.17, 0.17]
+fundido = 0.04
+descripcion = "Ladra."
+
+[animaciones.sneeze]
+cuadros = ["boop", "sneeze"]
+duraciones = [0.35, 0.6]
+movimientos = ["retroceso", "ninguno"]
+fundido = 0.05
+descripcion = "Estornuda."
+
+[animaciones.giggle]
+cuadros = ["giggle_a", "giggle_b", "giggle_a", "giggle_b", "giggle_a", "giggle_b", "giggle_a"]
+duraciones = [0.16, 0.16, 0.16, 0.16, 0.16, 0.16, 0.5]
+fundido = 0.06
+descripcion = "Se ríe tapándose la boca."
+
+[acciones]
+saludar = "welcome"
+festejar = "party"
+bailar = "dance"
+cafe = "coffee"
+bostezo = "yawn"
+estirarse = "stretch"
+rascarse = "scratch"
+mover_la_cola = "wag"
+ladrar = "bark"
+estornudar = "sneeze"
+reirse = "giggle"
+
+# Para más adelante (se lee, todavía no se usa): la voz de Wawi 1.
+[voz]
+id = "jf_alpha"
+velocidad = 1.05
+tono = 3                 # semitonos más agudo

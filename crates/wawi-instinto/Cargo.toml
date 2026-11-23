@@ -1,0 +1,36 @@
+[package]
+name = "wawi-instinto"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+# The "instinto" service: follow-up questions from `<home>/cola/preguntas`
+# watched by a worker with no model in the loop, and a fact in
+# `<home>/cola/hechos` when one comes true. docs/INSTINTO.md is the
+# reference. Threads and blocking I/O, like the rest of Wawi. It never runs
+# on Wawi's turn path: it is its own process (an MCP plugin, or alone).
+
+[dependencies]
+wawi-core = { path = "../wawi-core" }
+# Manifest loading, the MCP client and secrets, reused for `mcp` sources.
+wawi-plugins = { path = "../wawi-plugins" }
+# Civil times, the WallClock trait and FakeClock for tests.
+wawi-tools = { path = "../wawi-tools" }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.149"
+toml = "=1.1.6"
+# `http` sources. Same version the plugin host uses.
+ureq = "=3.5.0"
+# `regex` extraction and `coincide`. Already in the lockfile.
+regex = "=1.13.1"
+# localtime_r / mktime for the system clock. Same version as the app.
+libc = "=0.2.190"
+
+[[bin]]
+name = "wawi-instinto"
+path = "src/main.rs"
+
+# The observer's eval harness: precision and recall per model.
+[[bin]]
+name = "instinto-bench"
+path = "src/bin/bench.rs"

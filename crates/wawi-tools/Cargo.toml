@@ -1,0 +1,11 @@
+[package]
+name = "wawi-tools"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+wawi-core = { path = "../wawi-core" }
+wawi-memory = { path = "../wawi-memory" }
+# Tool arguments and the reminders file. Same version the brain already uses.
+serde_json = "=1.0.149"

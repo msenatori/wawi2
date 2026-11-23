@@ -1,0 +1,31 @@
+[package]
+name = "wawi-app"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "wawi2"
+path = "src/main.rs"
+
+[dependencies]
+wawi-core = { path = "../wawi-core" }
+wawi-memory = { path = "../wawi-memory" }
+wawi-brain-claude = { path = "../wawi-brain-claude" }
+wawi-stt-parakeet = { path = "../wawi-stt-parakeet" }
+wawi-tts-kokoro = { path = "../wawi-tts-kokoro" }
+# The pure playback queue builds everywhere; live audio and the hotkey are macOS only.
+wawi-audio-mac = { path = "../wawi-audio-mac" }
+# Her body on screen: the mascot and the menu bar item.
+wawi-body = { path = "../wawi-body" }
+# Her tools: memory, timers and reminders.
+wawi-tools = { path = "../wawi-tools" }
+# Everything beyond the base: plugins over MCP, watches, routines, the inbox.
+wawi-plugins = { path = "../wawi-plugins" }
+# The simulator builds tool arguments. Same version the brain already uses.
+serde_json = "=1.0.149"
+
+[target.'cfg(unix)'.dependencies]
+# Local time for the time route and the logs, and the Ctrl+C handler.
+# Same version the speech crates already use.
+libc = "=0.2.190"

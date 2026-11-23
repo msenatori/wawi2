@@ -1,0 +1,32 @@
+[package]
+name = "wawi-autoarreglo"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+# "Autoarreglo": Wawi notices a problem, builds a fix with Opus in a git
+# worktree outside the repo, runs it through gates she cannot edit, and
+# PROPOSES it to the owner. She never applies it on her own.
+# docs/AUTOARREGLO.md is the reference. Threads and blocking I/O, like the
+# rest of Wawi. It never runs on Wawi's turn path: it is its own process
+# (an MCP plugin with the worker inside, or the worker alone).
+#
+# No new dependencies: every crate below is already in the lockfile, at the
+# same pinned version the rest of the workspace uses.
+
+[dependencies]
+# The maildir queues (make_queue, valid_id, the queue names) and the log stamp.
+wawi-plugins = { path = "../wawi-plugins" }
+# Civil times, the WallClock trait and FakeClock for tests.
+wawi-tools = { path = "../wawi-tools" }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.149"
+toml = "=1.1.6"
+# The secret scan and the log grouping. Already in the lockfile.
+regex = "=1.13.1"
+# localtime_r / mktime for the system clock, killpg for the timeout.
+libc = "=0.2.190"
+
+[[bin]]
+name = "wawi-autoarreglo"
+path = "src/main.rs"

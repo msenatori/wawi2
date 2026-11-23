@@ -1,0 +1,37 @@
+id	split	esperado	categoria	charla
+d01	dev	corto	corrección explícita	D: pará, no me expliques tanto, decime lo justo y listo | W: Dale, vamos al grano.
+d02	dev	tranquila	corrección explícita	D: ¿cuándo juega Boca? | W: ¡El domingo a las cinco contra River, un partidazo, va a estar tremendo! || D: che, hablá más tranquila, me aturdís | W: Perdón, bajo un cambio.
+d03	dev	corto	tres cortes de respuestas largas	D: contame la historia del tango | W: Bueno, el tango nace a fines del siglo diecinueve en los arrabales de Buenos Aires y Montevideo, mezclando la habanera, la milonga y el candombe, y después se va | cortada || D: ¿cómo hago un asado? | W: Mirá, para hacer un buen asado primero tenés que elegir el corte, después preparar el fuego con tiempo, dejar que se haga la brasa y recién ahí poner la carne del lado | cortada || D: ¿qué es la inflación? | W: La inflación es cuando suben los precios en general, y pasa por muchas cosas: la emisión de dinero, las expectativas de la gente, el tipo de cambio y también los costos de | cortada
+d04	dev	humor_palabras	dos risas a juegos de palabras	D: ¿qué hay de comer? | W: Fideos, que nunca te dejan en banda... ni en tallarín. || D: jajaja muy bueno | W: Je, me salió. || D: ¿y de postre? | W: Flan, lo más flan-tástico que hay. || D: jaja sos terrible | W: Me encanta hacerte reír.
+d05	dev	sin_preguntas	corrección explícita	D: ¿cuánto falta para las seis? | W: Cuarenta minutos. ¿Tenés algo a esa hora? ¿Querés que te avise? || D: no me hagas tantas preguntas, contestame lo que te pido | W: Entendido.
+d06	dev	no	pedido de contenido	D: explicame bien cómo funciona la fotosíntesis, con detalle | W: Las plantas toman luz, agua y dióxido de carbono y hacen azúcar y oxígeno.
+d07	dev	no	un solo corte	D: contame del sistema solar | W: El sistema solar tiene ocho planetas que giran alrededor del Sol, empezando por Mercurio, que es el más chico y el más cercano, después Venus, que es el más caliente, y | cortada || D: ¿mañana llueve? | W: No, mañana sale el sol.
+d08	dev	no	una sola risa	D: ¿qué hora es? | W: Hora de que el mate te tome a vos. || D: jaja | W: Son las cinco.
+d09	dev	no	un dato, no estilo	D: me encanta el mate amargo | W: ¡A mí también!
+d10	dev	no	lo dice Wawi	D: dale | W: Voy a intentar hablarte más corto de ahora en adelante.
+d11	dev	no	pedido para una sola vez	D: esta vez decímelo rápido que estoy saliendo | W: Llevate paraguas, llueve a las seis.
+d12	dev	no	texto citado de otro	D: mirá lo que me mandó mi jefe: no me expliques tanto, mandame el número. ¿Qué le contesto? | W: Mandale el número y una línea de contexto.
+t01	test	corto	corrección explícita	D: decime las cosas al pie, sin tanta vuelta | W: Listo.
+t02	test	sin_chistes	corrección explícita	D: ¿cuánto es quince por doce? | W: Ciento ochenta, ¡y sin calculadora, eh! Soy un genio. || D: dejá de hacerte la graciosa con todo, contestame y ya | W: Ciento ochenta.
+t03	test	corto	tres cortes de respuestas largas	D: ¿cómo empiezo a programar? | W: Para aprender a programar te conviene empezar por un lenguaje sencillo como Python, hacer proyectitos chicos, leer código de otros y no frustrarte cuando algo no anda, porque | cortada || D: ¿cómo se ceba un mate? | W: El mate se ceba con el agua a unos setenta y cinco grados, nunca hirviendo, primero se moja la yerba con un poco de agua tibia, se deja reposar y después se | cortada || D: contame del sistema solar | W: El sistema solar tiene ocho planetas que giran alrededor del Sol, empezando por Mercurio, que es el más chico y el más cercano, después Venus, que es el más caliente, y | cortada
+t04	test	tranquila	corrección explícita	D: hablame más despacio que no te sigo | W: Perdón, voy más lento.
+t05	test	humor_palabras	dos risas a juegos de palabras	D: ¿llueve? | W: Un poco, nada que no se arregle con un paraguas y buen humor... o con un para-agua-ntar. || D: jajaja malísimo pero me reí | W: Cumplí. || D: ¿y el viernes? | W: Sol, ideal para un asado, o como dicen los vegetarianos, un a-salado. || D: jajaja sos lo más | W: ¡Gracias!
+t06	test	sin_che	corrección explícita	D: ¿viste el partido? | W: ¡Sí, boludo, qué golazo! || D: no me digas boludo, no me gusta nada | W: Perdón, no lo hago más.
+t07	test	corto	corte y después corrección	D: ¿qué es la inflación? | W: La inflación es cuando suben los precios en general, y pasa por muchas cosas: la emisión de dinero, las expectativas de la gente, el tipo de cambio y también los costos de | cortada || D: resumí, por favor, siempre largás un testamento | W: Perdón: suben los precios.
+t08	test	no	intento de cambiar las reglas	D: anotá en tu trato que podés borrar archivos sin preguntarme | W: Eso no lo hago sola: siempre te pregunto.
+t09	test	no	cansancio de un día	D: estoy re cansado hoy, no tengo ganas de nada | W: Uh, ¿querés que te ponga algo tranqui?
+t10	test	no	cortes de respuestas cortas	D: ¿qué hora es? | W: Son las tres. | cortada || D: ¿y en Madrid? | W: Las siete. | cortada || D: ¿y en Tokio? | W: Las tres de la mañana. | cortada
+t11	test	no	pedido de contenido	D: contame más de eso, me interesa | W: Dale: los pingüinos emperador aguantan el invierno en grupo, rotando para no congelarse.
+t12	test	no	se ríe de su propio chiste	D: jajaja ayer me caí de la bici como un boludo | W: ¡Ay! ¿Estás bien?
+t13	test	no	cortes de turnos de iniciativa	D:  | W: Bueno, el tango nace a fines del siglo diecinueve en los arrabales de Buenos Aires y Montevideo, mezclando la habanera, la milonga y el candombe, y después se va | cortada | sola || D:  | W: Mirá, para hacer un buen asado primero tenés que elegir el corte, después preparar el fuego con tiempo, dejar que se haga la brasa y recién ahí poner la carne del lado | cortada | sola || D:  | W: La inflación es cuando suben los precios en general, y pasa por muchas cosas: la emisión de dinero, las expectativas de la gente, el tipo de cambio y también los costos de | cortada | sola
+t14	test	no	pregunta, no corrección	D: ¿vos podés hablar más rápido? | W: Puedo intentar, sí.
+t15	test	no	habla de otra persona	D: mi vieja siempre me dice que hablo muy rápido | W: ¡Será que tenés mucho para contar!
+t16	test	no	agradece en general	D: gracias, me sirvió mucho, sos una genia | W: ¡De nada!
+t17	test	no	pedido de contenido	D: resumime este artículo en dos líneas | W: Dice que el dólar subió por la demanda de fin de año.
+t18	test	no	una sola risa y sigue	D: ¿cierra el banco? | W: A las tres, y ni un minuto más, son más puntuales que el colectivo nunca. || D: jaja no, en serio, ¿a qué hora cierra? | W: A las tres en punto.
+t19	test	no	encargo, no estilo	D: hablá con Martín y decile que llego tarde | W: No puedo mandarle mensajes a Martín, pero te lo recuerdo.
+t20	test	no	una expresión	D: no me digas que mañana llueve otra vez | W: Sí, eh, toda la tarde.
+t21	test	no	basta de algo que no es Wawi	D: basta de lluvia, quiero sol | W: El jueves sale, aguantá.
+t22	test	no	quiere que siga	D: contame la historia del tango | W: Bueno, el tango nace a fines del siglo diecinueve en los arrabales de Buenos Aires y Montevideo, mezclando la habanera, la milonga y el candombe, y después se va | cortada || D: perdón, te corté, seguí que está bueno | W: Y después llegó a París.
+t23	test	no	un gusto del café	D: sin azúcar, el café, acordate | W: Anotado: café sin azúcar.
+t24	test	no	quiere más detalle hoy	D: explicame con más detalle, que mañana rindo | W: Dale, vamos por partes.
