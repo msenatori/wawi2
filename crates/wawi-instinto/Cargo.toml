@@ -3,6 +3,7 @@ name = "wawi-instinto"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
 
 # The "instinto" service: follow-up questions from `<home>/cola/preguntas`
 # watched by a worker with no model in the loop, and a fact in

@@ -3,6 +3,7 @@ name = "wawi-audio-mac"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
 
 # Measures whether voice processing removes Wawi's own voice from the mic.
 [[bin]]

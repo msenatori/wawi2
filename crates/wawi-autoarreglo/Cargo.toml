@@ -3,6 +3,7 @@ name = "wawi-autoarreglo"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
 
 # "Autoarreglo": Wawi notices a problem, builds a fix with Opus in a git
 # worktree outside the repo, runs it through gates she cannot edit, and

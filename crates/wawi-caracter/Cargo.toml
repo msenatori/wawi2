@@ -3,6 +3,7 @@ name = "wawi-caracter"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
 
 # The «carácter» plugin: learns the TRATO (how to talk to this owner: style,
 # not facts) from the turn feed and keeps it in `<home>/trato.md`. One

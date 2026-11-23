@@ -3,6 +3,7 @@ name = "wawi-stt-parakeet"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
 
 [dependencies]
 wawi-core = { path = "../wawi-core" }

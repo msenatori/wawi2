@@ -3,6 +3,7 @@ name = "wawi-body"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
 
 # Wawi's body: the mascot on screen and the menu bar item. The logic (state
 # to animation, the speech bubble, where she stands, the menu) is pure and

@@ -3,6 +3,7 @@ name = "wawi-plugins"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
 
 # The plugin host: every capability beyond the base is a plugin that speaks
 # MCP. Wawi is the MCP client; plugin tools are re-exposed through Wawi's own

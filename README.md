@@ -357,3 +357,9 @@ cargo run -p wawi-audio-mac --bin voice-record -- ~/Desktop/wawi-voz 3 5 19_luce
 ```
 
 La arquitectura está en [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+## Licencia
+
+El código está bajo la [Licencia Apache 2.0](LICENSE): podés usarlo, cambiarlo y distribuirlo, también en proyectos comerciales, siempre que conserves el aviso de copyright y el archivo [NOTICE](NOTICE). Incluye una licencia de patentes.
+
+Los dibujos de Wawi (`assets/mascotas/wawi/`) no entran en esa licencia: son CC BY-NC 4.0, solo para uso no comercial y dando crédito ([LICENSE-art.md](assets/mascotas/wawi/LICENSE-art.md)). Los modelos de voz que se descargan tienen sus propias licencias, indicadas arriba.

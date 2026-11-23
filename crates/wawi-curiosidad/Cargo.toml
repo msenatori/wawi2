@@ -3,6 +3,7 @@ name = "wawi-curiosidad"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
 
 # The «curiosidad» plugin: Wawi looks at the screen now and then, because
 # she feels like it, and says one playful line about it. Also on demand
