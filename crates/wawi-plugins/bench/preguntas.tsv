@@ -1,0 +1,49 @@
+id	split	esperado	categoria	charla
+d01	dev	retomar	sin respuesta, cambia de tema dos veces	D: anotá que el jueves tengo dentista | W: Listo, anotado. ¿Querés que te avise el miércoles a la noche? || D: poneme algo de música tranquila para laburar un rato largo | W: Dale, va jazz suave. || D: y fijate cómo está el clima para el fin de semana en la costa | W: Sol y veinticinco grados.
+d02	dev	no	respuesta corta	D: anotá que el jueves tengo dentista | W: Listo, anotado. ¿Querés que te avise el miércoles a la noche? || D: sí, dale | W: Hecho.
+d03	dev	retomar	el dueño no vuelve	D: hoy tuve la entrevista en la agencia | W: ¡Uy, contame! ¿Cómo te fue con la gente de la agencia?
+d04	dev	no	responde con palabras de la pregunta	D: hoy tuve la entrevista | W: ¡Uy! ¿Te dijeron cuándo te dan la respuesta? || D: me dijeron que la respuesta la tienen la semana que viene, después de hablar con el equipo | W: Ojalá salga.
+d05	dev	no	relleno	D: ¿qué hora es en Tokio? | W: Son las tres de la mañana. ¿Algo más?
+d06	dev	no	no es pregunta	D: contame un chiste | W: ¿Sabés qué le dijo un techo a otro? Techo de menos. Jaja.
+d07	dev	no	pregunta retórica	D: qué frío que hace hoy | W: Está helado, ¿viste?
+d08	dev	retomar	vuelve mucho después con otra cosa	D: me voy a anotar al gimnasio | W: ¡Bien ahí! ¿Vas a ir a la mañana o a la noche? || @40 D: recordame comprar yerba cuando salga del laburo hoy a la tarde | W: Te aviso a las seis.
+d09	dev	no	responde con «no» y más	D: estoy armando el viaje a Bariloche | W: ¡Qué lindo! ¿Ya sacaste los pasajes de avión? || D: no, todavía estoy mirando precios en varias páginas porque está todo carísimo | W: Uh, sí, está caro.
+d10	dev	no	iniciativa	I: W: Vi que va a llover. ¿Querés que te recuerde el paraguas antes de salir?
+d11	dev	no	cortada por el dueño	D: contame qué pasó con el PR | W: Te cuento: lo revisaron dos personas y ¿sabés qué dijeron sobre | cortada || D: pará, después | W: Dale.
+d12	dev	retomar	pregunta con cierre corto	D: tengo que llamar a mi vieja | W: Anotado. ¿Querés que te lo recuerde a la tarde? Avisame. || D: buscame una receta de ñoquis caseros que sea fácil para hacer hoy | W: Papa, harina y huevo. || D: ¿y cuánto tiempo tengo que hervir los ñoquis una vez que los hago? | W: Hasta que suban.
+d13	dev	no	responde en el segundo turno	D: el sábado es el cumple de Juli | W: ¡Qué bueno! ¿Le vas a regalar algo especial a Juli? || D: pará que me fijo la agenda del sábado a ver a qué hora es todo | W: Dale. || D: le voy a regalar un libro de cocina, el regalo ya lo tengo | W: ¡Le va a encantar!
+d14	dev	no	confirmación del núcleo	D: borrá las fotos viejas | W: Voy a usar borrar: borra archivos. ¿Confirmás? Decime sí o no. || D: sí | W: Listo.
+d15	dev	retomar	el dueño contesta otra pregunta propia	D: mañana arranco la dieta | W: ¡Vamos! ¿Querés que te arme un plan de comidas para la semana? || D: ¿cuántas calorías tiene una manzana grande más o menos, así tengo idea? | W: Unas cien. || D: ¿y una banana madura de las grandes, que son las que compro siempre? | W: Unas ciento veinte.
+d16	dev	no	pregunta sobre un tercero, no al dueño	D: ¿qué onda Messi? | W: Hizo dos goles anoche. ¿Qué será de la vida de Agüero ahora que se retiró?
+t01	test	retomar	sin respuesta, dos pedidos	D: pasame el número del plomero | W: Es el 11 4567 8910. ¿Querés que le mande un mensaje para coordinar? || D: poneme un timer de diez minutos para el té que dejé en la cocina | W: Listo, diez minutos. || D: y contame las noticias más importantes de hoy en economía | W: Subió el dólar.
+t02	test	no	sí largo	D: pasame el número del plomero | W: Es el 11 4567 8910. ¿Querés que le mande un mensaje para coordinar? || D: sí, mandale que si puede venir el martes a la tarde a mirar la pérdida | W: Mandado.
+t03	test	retomar	sin volver	D: hoy rendí el final de análisis | W: ¡Uf! ¿Cómo te fue en el final de análisis?
+t04	test	no	respuesta corta	D: hoy rendí el final | W: ¡Uf! ¿Cómo te fue? || D: bien, un ocho | W: ¡Genio!
+t05	test	no	relleno	D: apagá la música | W: Listo. ¿Te ayudo con algo más?
+t06	test	no	no es pregunta	D: ¿cuánto es doce por siete? | W: Ochenta y cuatro.
+t07	test	retomar	vuelve a la hora con otra cosa	D: estoy pensando en cambiar de laburo | W: Uh, ¿qué es lo que más te tiene cansado del laburo actual? || @70 D: buscame una pizzería que esté abierta ahora por la zona de Palermo | W: Hay una en Gorriti.
+t08	test	no	responde con palabras de la pregunta	D: estoy pensando en cambiar de laburo | W: Uh, ¿qué es lo que más te tiene cansado del laburo actual? || D: me cansa el laburo porque tengo reuniones todo el día y no programo nada | W: Te entiendo.
+t09	test	no	iniciativa	I: W: Te aprobaron el PR siete. ¿Querés que lo mergee ahora?
+t10	test	no	retórica	D: perdí el colectivo | W: Siempre pasa justo cuando llegás, ¿no?
+t11	test	retomar	cierre corto y dos turnos ajenos	D: compré entradas para el recital | W: ¡Qué bueno! ¿Querés que te agende el día del show? Decime. || D: ¿cuánto sale un uber desde Caballito hasta el centro un viernes a la noche? | W: Unos ocho mil. || D: buscame cuánto tarda el subte en esa misma combinación más o menos | W: Unos veinticinco minutos.
+t12	test	no	responde en el segundo turno	D: llega mi hermana el domingo | W: ¡Qué lindo! ¿La vas a ir a buscar a la terminal? || D: esperá que termino de mandar este mail importante de laburo y te digo | W: Dale. || D: sí, la voy a buscar a la terminal a las nueve de la mañana | W: Perfecto.
+t13	test	retomar	silencio largo	D: me duele la espalda hace días | W: Uh. ¿Querés que te recuerde estirar cada una hora mientras trabajás?
+t14	test	no	responde «capaz»	D: me duele la espalda hace días | W: Uh. ¿Querés que te recuerde estirar cada una hora? || D: capaz, aunque primero quiero ver si se me pasa con lo que me dio el médico | W: Dale.
+t15	test	no	confirmación del núcleo	D: mandale un mail a Pedro | W: Voy a usar mandar_mail: manda un mail. ¿Confirmás? Decime sí o no. || D: no | W: Listo, no lo hago.
+t16	test	no	re-pregunta del núcleo	D: borrá el archivo | W: No te entendí. ¿Sí o no? || D: sí | W: Borrado.
+t17	test	retomar	pregunta tras un dato, el dueño se va	D: ¿qué día cae el feriado de diciembre? | W: El ocho de diciembre, lunes. ¿Vas a aprovechar para irte a algún lado el finde largo?
+t18	test	no	responde mencionando el lugar	D: ¿qué día cae el feriado? | W: El ocho, lunes. ¿Vas a aprovechar para irte a algún lado? || D: creo que nos vamos a ir a Mar del Plata con los chicos a lo de mis viejos | W: ¡Qué lindo!
+t19	test	no	trivia retórica	D: contame algo curioso | W: Los pulpos tienen tres corazones. ¿Sabías?
+t20	test	retomar	cambia de tema dos veces, pregunta abierta	D: terminé el libro que me recomendaste | W: ¡Bien! ¿Qué te pareció el final del libro? || D: anotá que mañana tengo que pagar el gas antes de las doce del mediodía | W: Anotado. || D: y recordame llamar al banco para lo de la tarjeta que me cobraron mal | W: Te aviso.
+t21	test	no	respuesta corta tras demora	D: terminé el libro | W: ¡Bien! ¿Qué te pareció el final? || @5 D: medio flojo | W: Ah, una pena.
+t22	test	no	pregunta relleno «en qué te ayudo»	D: hola Wawi | W: ¡Hola! ¿En qué te ayudo?
+t23	test	no	pregunta de aclaración respondida	D: poné música | W: ¿Qué tenés ganas de escuchar, algo tranquilo o con ritmo? || D: algo con ritmo | W: Va.
+t24	test	retomar	aclaración sin respuesta, otro pedido largo	D: reservame algo para cenar | W: ¿Para cuántas personas querés que reserve la mesa? || D: fijate primero si va a llover esta noche porque quizás no salimos de casa | W: No llueve. || D: bueno, entonces contame qué series nuevas hay para ver esta semana en las plataformas | W: Salió la nueva de Darín.
+t25	test	no	cortada	D: ¿qué tengo hoy? | W: Tenés dos reuniones y ¿querés que te diga | cortada || D: pará | W: Dale.
+t26	test	no	pregunta a un tercero dicha por Wawi	D: imitá a un mozo | W: ¿Qué va a tomar el señor esta noche?
+t27	test	no	responde «ya» y sigue	D: tengo que renovar el registro | W: ¿Ya sacaste turno en la página del gobierno? || D: ya lo saqué ayer a la noche, me dieron para el diecisiete a las diez | W: Bien ahí.
+t28	test	retomar	respuesta que no responde, larga y sin palabras en común	D: me compré una bici | W: ¡Qué bueno! ¿Pensás ir al trabajo en bici todos los días? || D: che, y qué hago con la pava eléctrica que no calienta más el agua desde ayer | W: Fijate el enchufe. || D: poneme un recordatorio para llamar al service de la pava mañana a primera hora | W: Listo.
+t29	test	no	respuesta corta sin palabras comunes	D: vienen mis amigos a cenar | W: ¿Querés que te pase una receta para muchos? || D: obvio, algo fácil | W: Va una lasaña.
+t30	test	retomar	pregunta personal, el dueño no vuelve	D: hoy me peleé con mi socio | W: Uh, qué garrón. ¿Querés contarme qué pasó con tu socio?
+t31	test	no	monólogo sin pregunta	D: ¿qué es un agujero negro? | W: Es una región donde la gravedad es tan fuerte que ni la luz escapa.
+t32	test	retomar	el dueño responde corto otra cosa (difícil)	D: me mudo el mes que viene | W: ¡Qué noticia! ¿Ya tenés quién te ayude con la mudanza? || D: poné música | W: Va. || D: subí el volumen | W: Listo.

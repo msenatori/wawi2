@@ -29,6 +29,10 @@ wawi-brain-claude = { path = "../wawi-brain-claude" }
 
 # A tiny MCP server over stdio, for tests only.
 [[bin]]
+name = "preguntas-bench"
+path = "src/bin/preguntas_bench.rs"
+
+[[bin]]
 name = "fake-mcp"
 path = "src/bin/fake_mcp.rs"
 test = false

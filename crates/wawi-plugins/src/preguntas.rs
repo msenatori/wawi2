@@ -286,7 +286,9 @@ pub fn final_question(wawi: &str) -> Option<String> {
         None => candidate.trim(),
     };
     let plain = normalize(question);
-    if words(&plain) < 3 || FILLER.iter().any(|f| contains_words(&plain, f)) {
+    // Filler is short: «lo que más te cansa del laburo» is a real question.
+    let filler = words(&plain) <= 6 && FILLER.iter().any(|f| contains_words(&plain, f));
+    if words(&plain) < 3 || filler {
         return None;
     }
     let to_owner = plain.split_whitespace().any(|w| SECOND_PERSON.contains(&w))
@@ -308,8 +310,9 @@ pub fn answers(question: &str, owner: &str) -> bool {
         return true;
     }
     const OPENERS: &[&str] = &[
-        "si", "no", "dale", "obvio", "claro", "ni", "capaz", "todavia", "ya", "nah", "ok", "bueno",
-        "creo", "seguro", "listo",
+        // Not «bueno» or «listo»: they open anything.
+        "si", "no", "dale", "obvio", "claro", "ni", "capaz", "todavia", "ya", "nah", "ok", "creo",
+        "seguro",
     ];
     if OPENERS.contains(&owner_words[0]) {
         return true;
