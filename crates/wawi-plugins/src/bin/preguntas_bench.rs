@@ -182,7 +182,7 @@ fn main() {
     }
     let misses: Vec<&Outcome> = outcomes
         .iter()
-        .filter(|o| o.case.expected != !o.retaken.is_empty())
+        .filter(|o| o.case.expected == o.retaken.is_empty())
         .collect();
     if !misses.is_empty() {
         println!("\nErrores:");
