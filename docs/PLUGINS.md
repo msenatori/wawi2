@@ -459,7 +459,7 @@ Si preferís una clave personal de API (avanzado), poné en tu copia `auth = { c
 
 ## La API para una pantalla de Ajustes
 
-El menú tiene «Ajustes…» (`Command::OpenSettings`), que todavía no abre nada. La ventana de Ajustes usa `wawi_plugins::control::PluginControl`, que da `PluginHost::control()`. Es `Clone + Send + Sync`, así que vive en el hilo de la interfaz. Nada bloquea: leer copia una foto, y cada acción solo deja un pedido en el canal del anfitrión.
+El menú tiene «Ajustes…» (`Command::OpenSettings`): abre una ventana nativa de AppKit (`wawi-body`, `mac/settings.rs`; lo puro en `settings.rs`), que se arma la primera vez que se abre y se suelta entera al cerrarla. Usa `wawi_plugins::control::PluginControl`, que da `PluginHost::control()`. Es `Clone + Send + Sync`, así que vive en el hilo de la interfaz. Nada bloquea: leer copia una foto, y cada acción solo deja un pedido en el canal del anfitrión.
 
 | Llamada | Qué hace |
 | --- | --- |
@@ -470,9 +470,10 @@ El menú tiene «Ajustes…» (`Command::OpenSettings`), que todavía no abre na
 | `disconnect(nombre)` | borra el permiso del llavero y lo cierra |
 | `set_enabled(nombre, bool)` | lo prende (instala uno de Wawi si hace falta) o lo apaga |
 | `remove(nombre)` | lo cierra, borra el permiso y saca su carpeta |
+| `check_all()` / `check(nombre)` | revisión de salud: cada plugin prendido contesta `tools/list` (tope 6 s), renovando antes un token OAuth por vencer; una revisión en curso se comparte, nunca dos a la vez |
 | `subscribe(f)` | `f(&[PluginInfo])` con la lista entera después de cada cambio |
 
-`PluginInfo` trae `name`, `title`, `description`, `kind` (`Propio` o `Conector`), `installed`, `enabled`, `state` (`Conectado`, `Conectando`, `Desconectado`, `Apagado`, `Error`, con `label()` en castellano), `auth` (`"ninguna"`, `"oauth"` o `"clave"`), `url`, `detail` (por qué no conecta, o cómo conseguir el programa) y `tools`. `Suggestion` trae `name`, `title`, `url`, `description`, `icon` y `template`.
+`PluginInfo` trae `name`, `title`, `description`, `kind` (`Propio` o `Conector`), `installed`, `enabled`, `state` (`Conectado`, `Conectando`, `Desconectado`, `Apagado`, `Error`, con `label()` en castellano), `auth` (`"ninguna"`, `"oauth"` o `"clave"`), `url`, `detail` (por qué no conecta, o cómo conseguir el programa), `tools`, `checking` (hay una revisión en curso) y `check` (lo que encontró la última). `Suggestion` trae `name`, `title`, `url`, `description`, `icon` y `template`.
 
 `subscribe` corre en el hilo del anfitrión: pasale la lista a la cola de la interfaz y volvé enseguida.
 

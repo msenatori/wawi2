@@ -19,6 +19,7 @@ mod incidents;
 #[cfg(target_os = "macos")]
 mod mac;
 mod mute;
+mod settings;
 mod turns;
 
 #[cfg(test)]

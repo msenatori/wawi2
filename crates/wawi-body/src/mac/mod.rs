@@ -22,6 +22,7 @@
 mod desktop;
 mod frames;
 mod secret;
+mod settings;
 mod views;
 
 use std::cell::RefCell;
@@ -58,6 +59,7 @@ use crate::menu::{self, Action, LAYOUT, MenuItem, MenuState};
 use crate::mood::Mood;
 use crate::pack::{self, Installed, Look, Pack};
 use crate::place::{self, Placement, Rect};
+use crate::settings::{PetPanel, SettingsSource};
 use crate::{BodyConfig, BodyError, BodyLink, Command, OnCommand, Update};
 
 /// Room around the sprite for the hop, the tilt and the badge.
@@ -214,6 +216,8 @@ pub(crate) struct Ui {
     glyph: &'static str,
     closing: bool,
     moving: Option<Moving>,
+    /// What the settings window shows that is not hers (plugins, voice…).
+    settings: SettingsSource,
 }
 
 fn log(line: String) {
@@ -290,6 +294,7 @@ impl Ui {
             glyph: "",
             closing: false,
             moving: None,
+            settings: SettingsSource::default(),
         };
         ui.dress();
         ui.refresh_glyph();
@@ -559,6 +564,20 @@ impl Ui {
                 DispatchQueue::main().exec_async(move || {
                     if let Some(mtm) = MainThreadMarker::new() {
                         secret::ask(mtm, ask);
+                    }
+                });
+            }
+            Update::Settings(source) => {
+                settings::subscribe(&source);
+                self.settings = source;
+            }
+            Update::ShowSettings => {
+                // After this update, outside the UI's borrow: building the
+                // window may call back into it.
+                let (source, pets) = (self.settings.clone(), self.pet_panel());
+                DispatchQueue::main().exec_async(move || {
+                    if let Some(mtm) = MainThreadMarker::new() {
+                        settings::show(mtm, &source, pets);
                     }
                 });
             }
@@ -869,7 +888,69 @@ impl Ui {
         self.setup_body();
         self.save();
         self.refresh_menu();
+        settings::pets_changed(&self.pet_panel());
         self.tick();
+    }
+
+    // -- the settings window's «Mascota» -------------------------------------
+
+    /// The packs, in the same order as the «Mascota» submenu.
+    fn pets(&self) -> Vec<Installed> {
+        let mut pets = pack::installed(&self.config.assets, self.config.home.as_deref());
+        if !pets.iter().any(|p| p.dir == self.pack.dir) {
+            pets.insert(
+                0,
+                Installed {
+                    id: self.pack.id().to_owned(),
+                    nombre: self.pack.name().to_owned(),
+                    dir: self.pack.dir.clone(),
+                    builtin: self.pack.builtin,
+                },
+            );
+        }
+        pets
+    }
+
+    fn pet_panel(&self) -> PetPanel {
+        let pets = self.pets();
+        PetPanel {
+            active: pets.iter().position(|p| p.dir == self.pack.dir),
+            pets: pets.into_iter().map(|p| p.nombre).collect(),
+            name: self.pack.name().to_owned(),
+            has_body: self.pack.body.is_some(),
+            moving: self.placement.movement,
+            visible: self.placement.visible,
+            preview: self.config.pet_dir.is_some() || self.config.state_file.is_none(),
+        }
+    }
+
+    pub(crate) fn settings_pick_pet(&mut self, index: usize) {
+        if let Some(pet) = self.pets().get(index).cloned() {
+            self.switch_pet(&pet);
+        }
+        settings::pets_changed(&self.pet_panel());
+    }
+
+    pub(crate) fn settings_set_moving(&mut self, on: bool) {
+        if self.placement.movement != on {
+            self.toggle_movement();
+        }
+    }
+
+    pub(crate) fn settings_set_visible(&mut self, on: bool) {
+        if self.placement.visible != on {
+            self.set_visible(on);
+        }
+    }
+
+    pub(crate) fn open_pets_folder(&self) {
+        let Some(home) = &self.config.home else {
+            return;
+        };
+        let dir = home.join("mascotas");
+        let _ = std::fs::create_dir_all(&dir);
+        let url = NSURL::fileURLWithPath(&NSString::from_str(&dir.to_string_lossy()));
+        NSWorkspace::sharedWorkspace().openURL(&url);
     }
 
     fn place_mascot(&mut self) {
@@ -905,6 +986,7 @@ impl Ui {
         }
         self.save();
         self.refresh_menu();
+        settings::pets_changed(&self.pet_panel());
         self.tick();
     }
 
@@ -1019,6 +1101,7 @@ impl Ui {
             self.save();
         }
         log(format!("ahora la mascota es {}", self.pack.name()));
+        settings::pets_changed(&self.pet_panel());
         self.tick();
     }
 
@@ -1136,6 +1219,7 @@ impl Ui {
             return;
         }
         self.closing = true;
+        settings::close_now();
         if let Some(timer) = self.timer.take() {
             timer.invalidate();
         }

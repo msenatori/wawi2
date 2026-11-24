@@ -1,14 +1,27 @@
 //! `wawi2 --ui-demo[=LOOK]`: Wawi's body with no audio and no brain. A worker
 //! thread plays a little script of updates, exactly what the host would send,
 //! so every look can be seen (and screenshotted) without speaking.
+//!
+//! «Ajustes…» opens the real settings window. Its plugins come from a
+//! plugin host over a scratch home in the temp folder, with credentials in
+//! memory: the demo never starts the owner's plugins nor touches the
+//! Keychain. `WAWI2_DEMO_AJUSTES=1` opens the window at start (to see it
+//! or take a picture of it).
 
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::rc::Rc;
 use std::sync::atomic::Ordering;
+use std::sync::{Arc, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use wawi_body::{BodyLink, Command, Flash, Mood, Update};
+use wawi_core::{Event, Registry};
+use wawi_plugins::control::PluginControl;
+use wawi_plugins::keychain::MemoryStore;
+use wawi_plugins::{HostOptions, PluginEvent, PluginHost, PluginSink, Services};
+use wawi_tts_kokoro::VoiceSettings;
 
 use super::mac::{QUIT, body_config, catch_ctrl_c};
 use super::{DemoLook, exit};
@@ -162,16 +175,27 @@ pub fn main(hold: Option<DemoLook>, home: Option<PathBuf>, pet: Option<PathBuf>)
     let on_command = Box::new(|command, link: &BodyLink| match command {
         Command::SetListening(listening) => link.send(Update::Muted(!listening)),
         Command::Quit => QUIT.store(true, Ordering::SeqCst),
-        Command::OpenSettings => {}
+        Command::OpenSettings => link.send(Update::ShowSettings),
     });
     let mut config = body_config(home.as_deref());
     config.pet_dir = pet.or(config.pet_dir);
     let result = wawi_body::run(config, on_command, move |link| {
+        link.send(Update::Settings(super::settings::source(
+            scratch_plugins(),
+            &VoiceSettings::default(),
+            None,
+            None,
+            &wawi_core::Config::default().instinct,
+        )));
+        if std::env::var_os("WAWI2_DEMO_AJUSTES").is_some() {
+            link.send(Update::ShowSettings);
+        }
         thread::spawn(move || {
             play(&link, hold);
             link.close();
         });
     });
+    let _ = std::fs::remove_dir_all(scratch_home());
     match result {
         Ok(()) => {
             println!("Chau.");
@@ -182,6 +206,47 @@ pub fn main(hold: Option<DemoLook>, home: Option<PathBuf>, pet: Option<PathBuf>)
             ExitCode::from(exit::ERROR)
         }
     }
+}
+
+struct ScratchSink(mpsc::Sender<PluginEvent>);
+
+impl PluginSink for ScratchSink {
+    fn core(&self, _event: Event) {}
+    fn plugin(&self, event: PluginEvent) {
+        let _ = self.0.send(event);
+    }
+}
+
+/// A plugin host for the demo's «Ajustes»: a scratch home in the temp
+/// folder, credentials in memory, Wawi's own catalog and suggestions.
+fn scratch_home() -> PathBuf {
+    std::env::temp_dir().join(format!("wawi2-ui-demo-{}", std::process::id()))
+}
+
+fn scratch_plugins() -> Option<PluginControl> {
+    let home = scratch_home();
+    let (tx, rx) = mpsc::channel();
+    let (give, take) = mpsc::channel();
+    thread::spawn(move || {
+        let services = Services {
+            store: Arc::new(MemoryStore::new()),
+            ..Services::system()
+        };
+        let mut host = PluginHost::start_with(
+            &home,
+            None,
+            Rc::new(super::clock::SystemClock::new()),
+            Arc::new(ScratchSink(tx)),
+            HostOptions::default(),
+            services,
+        );
+        let _ = give.send(host.control());
+        let mut registry = Registry::default();
+        while let Ok(event) = rx.recv() {
+            host.on_event(event, &mut registry);
+        }
+    });
+    take.recv_timeout(Duration::from_secs(2)).ok()
 }
 
 #[cfg(test)]

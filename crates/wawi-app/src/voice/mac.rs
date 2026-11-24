@@ -254,6 +254,17 @@ fn run(
             config.style = format!("{}\n\n{notes}", config.style);
         }
     }
+    // What «Ajustes» shows. Sent once; the window is built only when the
+    // owner opens it.
+    if let Some((link, _)) = &body {
+        link.send(wawi_body::Update::Settings(super::settings::source(
+            plugins.as_ref().map(PluginHost::control),
+            voice.settings(),
+            config.effective_model(),
+            config.effective_effort(),
+            &wawi_core::Config::default().instinct,
+        )));
+    }
     println!(
         "  cerebro: Claude Code, modelo {}, esfuerzo {}",
         super::describe_choice(config.effective_model()),

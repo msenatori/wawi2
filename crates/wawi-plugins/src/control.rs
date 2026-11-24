@@ -84,6 +84,11 @@ pub struct PluginInfo {
     pub detail: Option<String>,
     /// Tools it gives the brain, when connected.
     pub tools: usize,
+    /// A health check («Revisar») is running for it right now.
+    pub checking: bool,
+    /// What its last health check found, if one ran since its state last
+    /// changed: `Ok(())` it answered, `Err(why)` it did not (no secrets).
+    pub check: Option<Result<(), String>>,
 }
 
 /// Where to answer when the action came from the `conectar` tool.
@@ -112,6 +117,11 @@ pub enum Request {
     },
     /// Closes it, forgets its credential and moves its folder away.
     Remove { name: String, reply: Option<Reply> },
+    /// A health check: asks the running plugin `name` (every running one
+    /// with `None`) to answer `tools/list` with a short timeout, renewing an
+    /// OAuth token first if it is about to expire. A plugin whose check is
+    /// already in flight joins it: never two at once for the same plugin.
+    Check { name: Option<String> },
 }
 
 type Listener = Box<dyn Fn(&[PluginInfo]) + Send + Sync>;
@@ -215,6 +225,19 @@ impl PluginControl {
         self.send(Request::Remove {
             name: name.to_owned(),
             reply: None,
+        });
+    }
+
+    /// Health check for every running plugin (see [`Request::Check`]). The
+    /// result shows in [`PluginInfo::checking`] and [`PluginInfo::check`].
+    pub fn check_all(&self) {
+        self.send(Request::Check { name: None });
+    }
+
+    /// Health check for one plugin.
+    pub fn check(&self, name: &str) {
+        self.send(Request::Check {
+            name: Some(name.to_owned()),
         });
     }
 

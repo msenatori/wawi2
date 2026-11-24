@@ -108,8 +108,8 @@ impl Controls {
                 link.send(Update::Muted(!listening));
             }
             Command::Quit => self.quit.store(true, Ordering::SeqCst),
-            // The settings window is not there yet: a hook for it.
-            Command::OpenSettings => {}
+            // The body builds the window (on first open) and shows it.
+            Command::OpenSettings => link.send(Update::ShowSettings),
         }
     }
 }
@@ -212,11 +212,12 @@ mod tests {
     }
 
     #[test]
-    fn settings_is_a_hook_for_now() {
+    fn ajustes_opens_the_bodys_settings_window_and_nothing_else() {
         static QUIT: AtomicBool = AtomicBool::new(false);
         let controls = Controls::new(&QUIT);
         let (link, rx) = BodyLink::detached();
         controls.apply(Command::OpenSettings, &link);
+        assert_eq!(rx.try_recv(), Ok(Update::ShowSettings));
         assert!(rx.try_recv().is_err());
         assert!(!QUIT.load(Ordering::SeqCst) && !controls.deaf());
     }

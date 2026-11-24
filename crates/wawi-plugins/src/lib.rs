@@ -136,6 +136,11 @@ pub enum PluginEvent {
         plugin: String,
         result: Result<bool, String>,
     },
+    /// A health check ([`Request::Check`]) ended.
+    Checked {
+        plugin: String,
+        result: Result<(), String>,
+    },
 }
 
 /// Opens a URL in the owner's browser.
@@ -220,6 +225,10 @@ pub struct PluginHost {
     errors: BTreeMap<String, String>,
     /// Plugins whose program is missing, and how to get it.
     missing: BTreeMap<String, String>,
+    /// Health checks in flight: a second request for one of these joins it.
+    checking: std::collections::BTreeSet<String>,
+    /// The last health check's result, until the plugin's state changes.
+    checked: BTreeMap<String, Result<(), String>>,
     tools_changed: bool,
     scheduler: Scheduler,
     problems: Vec<String>,
@@ -292,6 +301,8 @@ impl PluginHost {
             waiting: BTreeMap::new(),
             errors: BTreeMap::new(),
             missing: BTreeMap::new(),
+            checking: Default::default(),
+            checked: BTreeMap::new(),
             tools_changed: false,
             problems,
             feed: TurnFeed::default(),
@@ -393,6 +404,9 @@ impl PluginHost {
         }
         self.scheduler.remove_plugin(name);
         self.errors.remove(name);
+        // Its worker is gone: a check in flight never answers.
+        self.checking.remove(name);
+        self.checked.remove(name);
     }
 
     pub fn problems(&self) -> &[String] {
@@ -510,6 +524,7 @@ impl PluginHost {
                 self.crashes.up(&plugin);
                 self.waiting.remove(&plugin);
                 self.errors.remove(&plugin);
+                self.checked.remove(&plugin);
                 self.publish();
                 Vec::new()
             }
@@ -519,6 +534,7 @@ impl PluginHost {
                     running.ready = false;
                     running.settled = true;
                     self.failed(&plugin, &reason, false);
+                    self.checked.remove(&plugin);
                     self.errors.insert(plugin, reason);
                 }
                 self.publish();
@@ -529,9 +545,25 @@ impl PluginHost {
                     running.ready = false;
                     running.settled = true;
                     self.failed(&plugin, &reason, true);
+                    self.checked.remove(&plugin);
                     self.waiting.insert(plugin, reason);
                 }
                 self.publish();
+                Vec::new()
+            }
+            PluginEvent::Checked { plugin, result } => {
+                if self.checking.remove(&plugin) {
+                    self.log.line(&format!(
+                        "{plugin}: revisión {}",
+                        if result.is_ok() {
+                            "bien"
+                        } else {
+                            "con problemas"
+                        }
+                    ));
+                    self.checked.insert(plugin, result);
+                    self.publish();
+                }
                 Vec::new()
             }
             PluginEvent::Control(request) => {
@@ -745,6 +777,21 @@ impl PluginHost {
                     format!("Listo, saqué {}.", self.title(&name))
                 });
                 answer(&self.sink, reply, outcome);
+            }
+            Request::Check { name } => self.check(name.as_deref()),
+        }
+    }
+
+    /// Starts a health check on each running plugin asked for, unless one
+    /// is already in flight for it (then the request joins that one).
+    fn check(&mut self, only: Option<&str>) {
+        for running in &self.plugins {
+            let name = &running.manifest.name;
+            if only.is_some_and(|only| only != name) || self.checking.contains(name) {
+                continue;
+            }
+            if running.jobs.send(Job::Check).is_ok() {
+                self.checking.insert(name.clone());
             }
         }
     }
@@ -1166,6 +1213,8 @@ impl PluginHost {
                 .filter(|r| r.ready)
                 .map(|r| r.registered.len())
                 .unwrap_or(0),
+            checking: self.checking.contains(name),
+            check: self.checked.get(name).cloned(),
         }
     }
 

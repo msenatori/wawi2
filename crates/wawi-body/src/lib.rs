@@ -15,6 +15,8 @@
 //! - [`place`]: where she stands (and which pet is on screen), remembered in
 //!   `~/.wawi2/mascot.json`.
 //! - [`menu`]: the menu (menu bar and right click) and what each item does.
+//! - [`settings`]: the «Ajustes» window's pure side (what each section
+//!   and plugin row shows); the native window is built on first open.
 //! - [`body`]: her body on the desktop (the pack's `[cuerpo]`): gravity,
 //!   walking, climbing, the parachute, sitting on windows; pure, driven by
 //!   the time and a world of screens and windows.
@@ -45,6 +47,7 @@ pub mod menu;
 pub mod mood;
 pub mod pack;
 pub mod place;
+pub mod settings;
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -80,6 +83,11 @@ pub enum Update {
     /// with a hidden field. The answer goes to [`SecretAsk::reply`] only:
     /// the body never logs, shows or keeps it.
     AskSecret(SecretAsk),
+    /// What the settings window shows that the body does not own (plugins,
+    /// voice, instinct, permissions). Sent once, when the program has it.
+    Settings(settings::SettingsSource),
+    /// Open the settings window (built on first open, dropped on close).
+    ShowSettings,
     /// The program is done: close the windows and return from [`run`].
     Close,
 }
@@ -117,7 +125,7 @@ pub enum Command {
     SetListening(bool),
     /// End the program, the same way as Enter or Ctrl+C.
     Quit,
-    /// «Ajustes…»: open the settings window (a hook; nothing yet).
+    /// «Ajustes…»: the program answers with [`Update::ShowSettings`].
     OpenSettings,
 }
 

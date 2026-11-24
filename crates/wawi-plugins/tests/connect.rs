@@ -319,7 +319,11 @@ struct World {
 
 impl World {
     fn new(name: &str, services: Services) -> Self {
-        let home = temp(name);
+        Self::new_in(temp(name), services)
+    }
+
+    /// A host over a home prepared beforehand (plugins already installed).
+    fn new_in(home: PathBuf, services: Services) -> Self {
         let (tx, rx) = mpsc::channel();
         let clock: Rc<dyn WallClock> = FakeClock::at(Civil::date(2026, 11, 23).at(12, 0, 0), -3);
         let options = HostOptions {
@@ -707,6 +711,81 @@ fn wawis_own_plugins_install_turn_on_and_off() {
     // Something unknown.
     world.call("conectar", "p4", json!({ "plugin": "la heladera" }));
     assert!(matches!(world.outcome("p4"), ToolOutcome::Failure(t) if t.contains("No conozco")));
+    let _ = std::fs::remove_dir_all(&world.home);
+    let _ = std::fs::remove_dir_all(&catalog);
+}
+
+#[test]
+fn a_health_check_runs_once_per_plugin_and_says_who_needs_signing_in() {
+    let catalog = temp("catalogo-revisar");
+    catalog_with(&catalog, "caracter", env!("CARGO_BIN_EXE_fake-mcp"));
+    let store = Arc::new(MemoryStore::new());
+    let never: wawi_plugins::Opener = Arc::new(|_: &str| Err("no".into()));
+    // A connector that was never authorized: it waits for the owner.
+    let home = temp("revisar");
+    let dir = home.join("plugins/remoto");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("plugin.toml"),
+        "description = \"Remoto.\"\nauth = \"oauth\"\n\n[server]\nurl = \"https://127.0.0.1:9/mcp\"\n",
+    )
+    .unwrap();
+    let mut world = World::new_in(
+        home,
+        Services {
+            catalog: Some(catalog.clone()),
+            ..services(store, never, Vec::new())
+        },
+    );
+    world.host.control().set_enabled("caracter", true);
+    world.until("caracter conectado y remoto esperando", |w| {
+        w.info("caracter")
+            .is_some_and(|p| p.state == PluginState::Conectado)
+            && w.info("remoto")
+                .is_some_and(|p| p.state == PluginState::Desconectado)
+    });
+    assert_eq!(world.info("caracter").unwrap().check, None);
+
+    // «Revisar» twice in a row (the window opening, then the button): the
+    // second joins the check already in flight.
+    let control = world.host.control();
+    control.check_all();
+    control.check("caracter");
+    world.until("revisando", |w| {
+        w.info("caracter").is_some_and(|p| p.checking)
+    });
+    world.until("revisado", |w| {
+        w.info("caracter")
+            .is_some_and(|p| !p.checking && p.check.is_some())
+            && w.info("remoto")
+                .is_some_and(|p| !p.checking && p.check.is_some())
+    });
+    let caracter = world.info("caracter").unwrap();
+    assert_eq!(caracter.check, Some(Ok(())));
+    assert_eq!(caracter.state, PluginState::Conectado);
+    let remoto = world.info("remoto").unwrap();
+    match remoto.check {
+        Some(Err(why)) => assert!(why.contains("pide iniciar sesión"), "{why}"),
+        other => panic!("{other:?}"),
+    }
+    let log = std::fs::read_to_string(world.home.join("logs/plugins.log")).unwrap_or_default();
+    assert_eq!(
+        log.matches("caracter revisado: bien").count(),
+        1,
+        "one check, not two: {log}"
+    );
+
+    // A plugin that is off is not checked at all.
+    world.host.control().set_enabled("caracter", false);
+    world.until("apagado", |w| {
+        w.info("caracter")
+            .is_some_and(|p| p.state == PluginState::Apagado)
+    });
+    world.host.control().check("caracter");
+    world.until("nada que revisar", |w| {
+        w.info("caracter")
+            .is_some_and(|p| !p.checking && p.check.is_none())
+    });
     let _ = std::fs::remove_dir_all(&world.home);
     let _ = std::fs::remove_dir_all(&catalog);
 }

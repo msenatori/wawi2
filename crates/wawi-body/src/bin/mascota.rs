@@ -362,8 +362,8 @@ fn ver(args: &[String]) -> ExitCode {
     let on_command = Box::new(|command, link: &BodyLink| match command {
         Command::SetListening(listening) => link.send(Update::Muted(!listening)),
         Command::Quit => link.close(),
-        // No settings window in the previews.
-        Command::OpenSettings => {}
+        // The settings window, with only the pet's section filled in.
+        Command::OpenSettings => link.send(Update::ShowSettings),
     });
     let result = wawi_body::run(config, on_command, move |link| {
         if let Some(photo) = photo {

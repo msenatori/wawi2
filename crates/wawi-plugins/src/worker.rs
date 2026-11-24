@@ -26,6 +26,8 @@ use crate::{HostOptions, PUSH_METHOD, PluginEvent, PluginSink};
 
 /// The longest tool result handed to the brain.
 const MAX_RESULT: usize = 20_000;
+/// The longest a health check waits for `tools/list`.
+pub(crate) const CHECK_TIMEOUT: Duration = Duration::from_secs(6);
 
 pub(crate) enum Origin {
     Brain { turn: TurnId, call_id: String },
@@ -51,6 +53,8 @@ pub(crate) enum Job {
     /// The credential changed (a login, a key): drop the connection and
     /// connect again now.
     Reconnect,
+    /// A health check: answer `PluginEvent::Checked`.
+    Check,
     Shutdown,
 }
 
@@ -145,6 +149,13 @@ impl Worker {
                 Job::Shutdown => break,
                 Job::Call { origin, tool, args } => self.call(origin, &tool, args),
                 Job::Feed => self.drain_feed(),
+                Job::Check => {
+                    let result = self.health();
+                    self.sink.plugin(PluginEvent::Checked {
+                        plugin: self.name().to_owned(),
+                        result,
+                    });
+                }
                 Job::Relist { generation } if generation == self.generation => self.relist(),
                 Job::Closed { generation } if generation == self.generation => {
                     if self.client.is_some() {
@@ -417,6 +428,62 @@ impl Worker {
                 });
             }
             Err(error) => self.handle_error(error),
+        }
+    }
+
+    /// The health check: is it answering, with a valid credential? Parked
+    /// plugins answer at once (they need the owner); a dropped one tries to
+    /// connect now, without waiting out its backoff (the owner asked).
+    fn health(&mut self) -> Result<(), String> {
+        if self.parked {
+            return Err(format!("pide iniciar sesión: {}", self.last_error));
+        }
+        if self.client.is_none() {
+            self.connect();
+        }
+        if self.client.is_none() || !self.fresh_enough() {
+            return Err(self.last_error.clone());
+        }
+        let timeout = self.manifest.timeout.min(CHECK_TIMEOUT);
+        let Some(client) = self.client.as_mut() else {
+            return Err(self.last_error.clone());
+        };
+        let mut listed = client.list_tools(timeout);
+        if matches!(listed, Err(McpError::Unauthorized { .. }))
+            && matches!(self.manifest.auth, Auth::OAuth { .. })
+        {
+            // Refused before its time: renew once and ask again.
+            match self.refresh() {
+                Ok(()) => {
+                    if let Some(client) = self.client.as_mut() {
+                        listed = client.list_tools(timeout);
+                    }
+                }
+                Err(Fail::Auth(why)) => {
+                    self.park(why);
+                    return Err(self.last_error.clone());
+                }
+                Err(Fail::Other(why)) => return Err(self.secrets.scrub(&why)),
+            }
+        }
+        match listed {
+            Ok(_) => {
+                self.log.line(&format!("{} revisado: bien", self.name()));
+                Ok(())
+            }
+            Err(McpError::Timeout) => {
+                let why = format!("no contestó en {} s", timeout.as_secs_f32().ceil());
+                self.log.line(&format!("{} revisado: {why}", self.name()));
+                Err(why)
+            }
+            Err(error) => {
+                let why = self.secrets.scrub(&error.to_string());
+                self.handle_error(error);
+                if self.parked {
+                    return Err(self.last_error.clone());
+                }
+                Err(why)
+            }
         }
     }
 
