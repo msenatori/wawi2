@@ -35,8 +35,6 @@ pub enum Tipo {
     Rota,
     /// Autoarreglo could not run.
     NoCorrio,
-    /// The Claude subscription's usage limit stopped it.
-    Cupo,
 }
 
 impl Tipo {
@@ -47,7 +45,6 @@ impl Tipo {
             Tipo::Caidas => "caidas",
             Tipo::Rota => "rota",
             Tipo::NoCorrio => "no_corrio",
-            Tipo::Cupo => "cupo",
         }
     }
 }

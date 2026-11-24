@@ -78,6 +78,8 @@ El programa de voz deja un incidente cuando pasa algo de esto:
 
 La velocidad es tu regla: un turno lento es un problema como cualquier otro.
 
+Quedarse sin cupo de Claude no es un incidente: no hay nada que arreglar en el código (ver «Sin cupo» en `docs/ARCHITECTURE.md`).
+
 Escribir un incidente nunca frena un turno. Las cuentas son puras y baratas, y los archivos los escribe un hilo aparte. El mismo incidente se escribe como mucho una vez por minuto. Si nadie los lee (el plugin no está instalado), se guardan hasta 500 y después no se escriben más. Nunca va lo que dijiste vos ni lo que dijo Wawi: solo el tipo, los tiempos y el motivo del error. Un motivo que parece un secreto no se guarda.
 
 El archivo es así:
@@ -123,13 +125,13 @@ Cada problema es un archivo: `<home>/autoarreglo/problemas/<tipo>-<huella>.json`
 
 ## El intento
 
-1. **Antes de gastar.** Tiene que estar prendido, saber dónde está el repo, que el repo tenga al menos un commit, estar dentro de la ventana horaria (por defecto de 1 a 7), y no haber pasado el tope de intentos ni el presupuesto del día.
+1. **Antes de gastar.** Tiene que estar prendido, tener cupo de Claude (no hay un `<home>/cupo.json` vigente: ver «Sin cupo» en `docs/PLUGINS.md`), saber dónde está el repo, que el repo tenga al menos un commit, estar dentro de la ventana horaria (por defecto de 1 a 7), y no haber pasado el tope de intentos ni el presupuesto del día. Si una corrida de Opus choca con el límite de uso, lo anota en `cupo.json` y el intento espera al reinicio, sin aviso: eso lo dice Wawi.
 2. **La base tiene que estar verde.** En una copia limpia corre fmt, clippy y las pruebas. Si fallan, no gasta nada en Opus, te avisa («mis pruebas no pasan en el repo tal como está») y no vuelve a intentar hasta que haya un commit nuevo.
 3. **El worktree.** `git worktree add` en `<home>/autoarreglo/trabajo/<id>`, fuera del repo, en una rama nueva `autoarreglo/<id>` desde HEAD.
 4. **Opus.** Una corrida de `claude` sin cabeza, con `claude-opus-5-5`, encerrada en ese worktree. El brief es corto, está tapado y dice las reglas: qué no puede tocar, nada de dependencias nuevas, cuidar la velocidad, y primero una prueba que reproduzca el problema.
 5. **El commit lo hace el servicio**, no el agente: lo que el agente dejó queda en la rama.
 6. **Las compuertas**, una por una. La primera que falla corta todo.
-7. **El final.** Si pasa, una propuesta y un aviso. Si no, el worktree y la rama se borran, y el motivo queda en el historial del problema y en el brief del próximo intento.
+7. **El final.** Si pasa, una propuesta y un aviso. Si no, el worktree y la rama se borran, y el motivo queda en el historial del problema y en el brief del próximo intento. Que las compuertas rechacen un arreglo es lo normal y no se avisa; si el intento **no pudo correr** (no pudo crear el worktree, o Opus falló o se colgó), queda un aviso para el dueño («quise arreglarme sola pero no pude terminar…»), uno por día como mucho (`aviso-autoarreglo-<AAAAMMDD>`), y el último fallo en `<home>/plugins/.fallos/autoarreglo.json`.
 
 Todo corre con prioridad baja de CPU (`nice`), así una compilación de noche no frena un turno. Cargo corre sin red (`CARGO_NET_OFFLINE`) y compila en `<home>/autoarreglo/target`, aparte del tuyo.
 

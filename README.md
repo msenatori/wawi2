@@ -91,6 +91,7 @@ Para pasarla a otras personas sin compilar hace falta firmarla con un certificad
 - El servicio instinto, en `crates/wawi-instinto` y `plugins/instinto`: «avisame cuando aprueben el PR» o «si el dólar baja de mil» queda vigilando en otro proceso, sin modelo, y Wawi lo dice cuando pasa. Trae un observador de la charla, apagado, y un banco para decidir si prenderlo. La guía está en `docs/INSTINTO.md`.
 - La personalidad: un alma en cinco partes con una línea de ancla que viaja en cada turno, el plugin carácter (aprende cómo le gusta al dueño que le hablen, en `trato.md`; apagado) y el plugin curiosidad (mira la pantalla de vez en cuando y opina). La guía está en `docs/PERSONALIDAD.md`.
 - El cerebro real, en `crates/wawi-brain-claude`: Claude Code en modo headless (`claude -p`), con la suscripción del dueño. Sin clave de API. Un solo proceso vive entre turnos, el texto llega en vivo frase por frase, las herramientas de Wawi le llegan como servidor MCP dentro del mismo proceso y cancelar interrumpe de verdad.
+- Sin cupo: si la suscripción llega a su límite de uso, Wawi lo dice una vez con la hora del reinicio («me quedé sin cupo hasta las 18:00»), contesta sin el cerebro mientras tanto, frena lo de fondo y avisa cuando vuelve. También retoma una vez las preguntas que el dueño dejó sin contestar y avisa cuando algo de fondo no pudo terminar (un plugin que pide permiso de nuevo, uno que se cae seguido). Ver «Sin cupo» en `docs/ARCHITECTURE.md` y `docs/PERSONALIDAD.md`.
 
 ## Qué no funciona
 

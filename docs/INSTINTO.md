@@ -154,6 +154,7 @@ Opcional, y solo junto a `nuevos`. `{"pregunta": "¿Es una suba fuerte del dóla
 - Es una sola llamada a `claude -p` con `claude-haiku-5-5`, salida estructurada, sin herramientas, sin servidores MCP, sin tus ajustes (`--tools "" --setting-sources= --strict-mcp-config`). Los ítems van marcados como datos, no como órdenes.
 - Hay un tope por día para todas las preguntas juntas (40 por defecto). Sin cupo, ese día no se juzga ni se dice nada.
 - Los ítems juzgados quedan vistos aunque el juez diga que no: no se vuelven a juzgar.
+- Si la suscripción de Claude está sin cupo (el límite de uso, `<home>/cupo.json`, ver `docs/PLUGINS.md`), el juez no corre: los ítems nuevos quedan sin juzgar y siguen siendo nuevos, la pregunta vuelve a mirar cuando termina el límite y eso no cuenta como fallo (nunca la rompe). Si una llamada choca con el límite, lo anota en `cupo.json` para que los demás esperen.
 
 ### Cuándo y hasta cuándo
 
@@ -187,7 +188,7 @@ Cuando se cumple, el worker deja `cola/hechos/new/<id>.json`:
 - El id del hecho es el de la pregunta. El host no repite un id que ya está en `cur/`, y el worker no escribe un hecho cuyo id ya está en `new/` o `cur/`. Así nunca se dice dos veces.
 - Con `repetir`, el id es `<id>.1`, `<id>.2`…
 - Con `nuevos`, el contexto trae los ítems nuevos (hasta 10) en vez del valor.
-- Después de `fallos_max` fallos seguidos: un hecho `<id>.rota` que dice «Dejé de poder mirar <que>: <motivo>», y la pregunta queda `rota`.
+- Después de `fallos_max` fallos seguidos: un hecho `<id>.rota` que dice «Dejé de poder mirar <que>: <motivo>», y la pregunta queda `rota`. Además queda como el último fallo del plugin en `<home>/plugins/.fallos/instinto.json`, para la ventana de Ajustes.
 
 ## La máquina de estados
 
@@ -243,6 +244,7 @@ El observador lee la charla y propone seguimientos que el dueño no pidió: «el
 - Guarda una ventana de los últimos 6 turnos y los seguimientos que ya hizo.
 - Por cada turno hace UNA llamada a `claude -p` (por defecto `claude-sonnet-5-5`, esfuerzo `low`), sin herramientas y con salida estructurada nada más: `{acciones: [{op: crear|actualizar|cerrar, id?, que, cuando?, tipo, al_cumplirse, confianza, cita}]}`. Casi siempre la lista viene vacía.
 - Nunca frena la charla: corre en su propio hilo, de a una llamada, con una cola de 8 turnos. Si se llena, el turno nuevo se descarta (y queda en el registro).
+- Sin cupo de Claude (`<home>/cupo.json`), no llama: ese turno no se mira.
 - Los turnos de iniciativa (Wawi habló sola) no se miran.
 
 ### El código decide

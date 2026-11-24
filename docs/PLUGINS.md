@@ -25,6 +25,8 @@ Esta guía es para quien escribe un plugin. Está en `docs/PLUGINS.md` del repos
   cola/hechos/            la cola de avisos (ver más abajo)
   cola/preguntas/         la cola de preguntas (ver más abajo)
   cola/incidentes/        los problemas de Wawi, para el autoarreglo (ver más abajo)
+  cupo.json               el límite de uso de Claude, mientras dura (ver «Sin cupo»)
+  plugins/.fallos/        el último fallo de cada plugin (ver «La API para una pantalla de Ajustes»)
 ```
 
 `<home>` es `$WAWI2_HOME` o, si no está, `~/.wawi2`.
@@ -342,6 +344,9 @@ Wawi mira `new/` cada 2 segundos. El archivo:
 | `urgencia` | `alta` (urgente, ver «El portón del instinto»), `normal` (por defecto) o `baja` (solo si se puede decir ya; si no, se posterga) |
 | `creado` | cuándo lo creaste, hora local |
 | `vence` | opcional, hora local `AAAA-MM-DDTHH:MM`: después de eso no se dice |
+| `desde` | opcional, hora local: antes de eso no se ofrece (se queda en `new/`) |
+
+El `decir` es dato. La instrucción del turno la pone Wawi, y depende del `origen`: `aviso` (algo de fondo no pudo terminar: «contáselo corto, sin tecnicismos, y qué puede hacer»), `preguntas` (una pregunta que el dueño dejó sin contestar: «retomala en una frase, como "che, al final…?", o no digas nada»), `cupo` (volvió el cupo: «decile que ya estás de vuelta») y cualquier otro (la instrucción general).
 
 Wawi lo pasa por el mismo portón. Si el portón lo posterga (horas de silencio, tope por hora, espacio mínimo, enfriamiento, el dueño hablando), el archivo **se queda en `new/`** y Wawi anota cuándo reintentar en `cola/hechos/espera.json` (`{"<id>": {"at": <segundo Unix>, "reason": "InstinctQuiet"}}`). Ese archivo es de Wawi: no lo toques. Al llegar esa hora lo vuelve a ofrecer, y así hasta que se dice o pasa su `vence`. Un aviso sin `vence` espera lo que haga falta. Wawi cerrada no pierde nada: al abrir respeta la hora anotada.
 
@@ -356,6 +361,26 @@ Cuando termina, el archivo va a `cur/<id>.json` con lo que pasó agregado:
 Pasar a `cur/` es el acuse de recibo. La entrega es «al menos una vez»: si Wawi se cierra con un aviso todavía en `new/`, lo vuelve a leer al abrir (respetando `vence`). Un `id` que ya está en `cur/` es un repetido y se borra de `new/` sin decirse.
 
 Igual que con los avisos empujados, el texto es dato: siempre es un turno de iniciativa, con herramientas de lectura nada más, y la instrucción la pone Wawi.
+
+## Avisos de lo que no pudo terminar
+
+Cuando algo de fondo falla de una forma que el dueño tiene que saber, queda un hecho con `origen: "aviso"` y Wawi se lo dice una vez, corto, por el portón (horas de silencio, ritmo, repetidos). El id es `aviso-<plugin>-<AAAAMMDD>`, así que hay como mucho uno por plugin por día. Hoy los dejan:
+
+- el anfitrión, cuando un plugin pide permiso de nuevo (el servicio rechazó o revocó el permiso; no cuando nunca se lo diste) o se cae 3 veces en 10 minutos;
+- el autoarreglo, cuando un intento no pudo correr (no pudo crear el worktree, o Opus falló);
+- el instinto, que ya dejaba `<id>.rota` cuando un seguimiento se rompe.
+
+Un plugin propio puede dejar el suyo con la misma forma (`wawi_plugins::avisos::plugin_notice`, o el archivo a mano). El límite de uso de Claude no es un aviso: Wawi lo dice sola, sin cerebro (ver «Sin cupo»).
+
+## Sin cupo
+
+Si la suscripción de Claude llega a su límite de uso, Wawi lo dice una vez («me quedé sin cupo hasta las 18:00») y deja de llamar a Claude hasta el reinicio. Mientras tanto existe `<home>/cupo.json`:
+
+```json
+{ "hasta": 1764007260, "sabido": true, "desde": 1764001800, "origen": "wawi" }
+```
+
+`hasta` es cuándo volver a probar (segundo Unix) y `sabido`, si es la hora que dio el CLI o una espera adivinada. Un plugin que llama a `claude -p` por su cuenta debería leerlo justo antes de cada llamada y no llamar mientras `hasta` no pasó (`wawi_brain_claude::cupo::active`); si una llamada choca con el límite, lo anota (`cupo::note`, con `cupo::in_output` para leer la salida del CLI). Nada de mirarlo en un bucle: se lee cuando ibas a llamar igual. Un archivo con `hasta` vencido no significa nada. Los plugins de Wawi (instinto, carácter, curiosidad y autoarreglo) ya lo hacen: el juez del instinto deja los ítems nuevos sin juzgar (siguen nuevos) y no cuenta un fallo, y la curiosidad contesta que no es buen momento.
 
 ## La cola de preguntas
 
@@ -449,7 +474,16 @@ El menú tiene «Ajustes…» (`Command::OpenSettings`), que todavía no abre na
 
 `PluginInfo` trae `name`, `title`, `description`, `kind` (`Propio` o `Conector`), `installed`, `enabled`, `state` (`Conectado`, `Conectando`, `Desconectado`, `Apagado`, `Error`, con `label()` en castellano), `auth` (`"ninguna"`, `"oauth"` o `"clave"`), `url`, `detail` (por qué no conecta, o cómo conseguir el programa) y `tools`. `Suggestion` trae `name`, `title`, `url`, `description`, `icon` y `template`.
 
-`subscribe` corre en el hilo del anfitrión: pasale la lista a la cola de la interfaz y volvé enseguida. La ventanita de la clave ya existe: el anfitrión la pide con un `KeyPrompt` y el cuerpo la muestra (`Update::AskSecret`).
+`subscribe` corre en el hilo del anfitrión: pasale la lista a la cola de la interfaz y volvé enseguida.
+
+**El último fallo de cada plugin** está aparte, en `<home>/plugins/.fallos/<plugin>.json` (un archivo por plugin, escrito entero con un temporal y un renombre, así cada proceso toca solo el suyo):
+
+```json
+{ "plugin": "linear", "cuando": "2026-11-24T15:10:02", "tipo": "permiso",
+  "detalle": "el servidor pide permiso (HTTP 401)" }
+```
+
+`tipo` es `permiso`, `caida`, `caidas` (se cae seguido), `rota` (un seguimiento del instinto) o `no_corrio` (el autoarreglo). El límite de uso de Claude no es de un plugin: está en `<home>/cupo.json` (ver «Sin cupo»). Se lee con `wawi_plugins::fallos::leer(home, nombre)` o `fallos::todos(home)`, sin pasar por el anfitrión. El archivo queda aunque el plugin se recupere: es el último fallo, y `cuando` dice cuándo fue; comparalo con `PluginInfo::state` para saber si sigue. La carpeta empieza con punto, así que el cargador de plugins la ignora. La ventanita de la clave ya existe: el anfitrión la pide con un `KeyPrompt` y el cuerpo la muestra (`Update::AskSecret`).
 
 ## Otros ejemplos: carácter y curiosidad
 

@@ -182,7 +182,7 @@ Está en `crates/wawi-curiosidad` y `plugins/curiosidad`. Es un plugin aparte: s
 
 Un `[[watch]]` en `plugin.toml` llama `momento` cada 20 minutos, sin modelo y sin gastar. Casi siempre contesta vacío, que para el watch es «nada». Dice que sí solo si se cumple TODO, de lo barato a lo caro:
 
-1. El dueño no la pausó.
+1. El dueño no la pausó, y Claude tiene cupo (no hay un `<home>/cupo.json` vigente).
 2. No son horas de silencio (23 a 8).
 3. Hoy miró menos de 2 veces.
 4. Pasaron 3 horas o más desde la última mirada.
@@ -255,6 +255,48 @@ Ese tiempo es de la herramienta: el cerebro después dice su frase. En una mirad
 
 Para que no mire: «no mires la pantalla» (o «por dos horas»). Para apagarla entera: `enabled = false` en su `plugin.toml`. Para que mire más o menos, cambiá el `every` del watch.
 
+## Las preguntas que quedaron en el aire
+
+Si Wawi le pregunta algo al dueño y él no contesta, ella se acuerda y lo retoma después, una vez y de pasada: «che, al final, ¿fuiste al cumple de Juli?». La idea viene de los bots de Orca: el 91 % de las respuestas del dueño llegan dentro de los 2 turnos siguientes a la pregunta.
+
+Está en `crates/wawi-plugins/src/preguntas.rs`. Son reglas, sin modelo, en el anfitrión de plugins: no gasta nada y no está en el camino del turno.
+
+- **Una pregunta para el dueño.** La respuesta de Wawi a un turno del dueño termina en una pregunta (`¿…?`, o una pregunta seguida de un cierre corto como «Avisame»), de 3 palabras o más, que le habla a él (voseo, «vos», «te»…). No cuentan el relleno corto («¿algo más?», «¿en qué te ayudo?»), las muletillas («¿viste?», «¿no?»), el «¿sí o no?» del núcleo, un turno que el dueño cortó ni sus turnos de iniciativa (volver a ofrecer algo es insistir).
+- **Contestada.** Uno de los 2 turnos siguientes del dueño la contesta: una respuesta corta (6 palabras o menos), un sí o un no al principio («sí», «no», «dale», «capaz», «ya»…), o una palabra con contenido en común con la pregunta («el dentista», «avisame» con «¿te aviso?»).
+- **Sin contestar.** Dos turnos del dueño que no la contestan, o ningún turno en 15 minutos. Queda un hecho de prioridad baja en `cola/hechos` (`origen: "preguntas"`): no antes de 2 horas después de la pregunta, y vence a los 3 días. Pasa por el portón como cualquier otro (horas de silencio, ritmo, tope por hora). La instrucción es de Wawi: «retomalo en una frase corta, como "che, al final…?"; no le reproches que no contestó; si ya no importa, no digas nada».
+- **Nunca dos veces.** El id sale de las palabras de la pregunta (`pregunta-<hash>`), y la cola no dice dos veces el mismo id.
+- **Una respuesta tardía** (con una palabra en común con la pregunta, antes de que se retome) la saca de la cola como `respondida`.
+
+### El banco
+
+`crates/wawi-plugins/bench/preguntas.tsv` tiene 48 charlas cortas, etiquetadas a mano: 16 en `dev` y 32 en `test`.
+
+- 16 positivas (hay que retomar): el dueño cambia de tema dos veces, se va y no vuelve, vuelve una hora después con otra cosa, contesta con otra pregunta suya.
+- 32 negativas: respuestas cortas, largas con palabras de la pregunta, «sí» o «no» y más, «capaz», en el segundo turno, relleno, muletillas, trivia («¿Sabías?»), preguntas a un tercero («¿Qué será de la vida de Agüero?»), la confirmación del núcleo, turnos cortados y turnos de iniciativa.
+
+```sh
+cargo run -p wawi-plugins --bin preguntas-bench
+cargo run -p wawi-plugins --bin preguntas-bench -- --split test
+```
+
+Corre las mismas reglas que el anfitrión, con un reloj de mentira, en milisegundos. Lo que cuenta es si al final queda algo para retomar. Una prueba (`the_bench_has_no_false_alarms`) cuida que nunca retome lo que no debe.
+
+Medición (24 de noviembre de 2026):
+
+| Parte | n | TP | FP | FN | TN | Precisión | Recall |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| dev | 16 | 5 | 0 | 0 | 11 | 100 % | 100 % |
+| test, primera vez | 32 | 8 | 0 | 3 | 21 | 100 % | 73 % |
+| test, después del arreglo | 32 | 10 | 0 | 1 | 21 | 100 % | 91 % |
+
+Las dos que se escapaban la primera vez eran errores generales: «¿qué es lo que **más** te tiene cansado del laburo?» se tomaba como el relleno «¿qué más?» (ahora el relleno solo cuenta en preguntas de 6 palabras o menos), y un «bueno, entonces contame…» contaba como respuesta (ahora «bueno» y «listo» no abren una respuesta). Como el arreglo salió de ver `test`, esa parte ya no está limpia.
+
+La que sigue fallando es la difícil a propósito: el dueño contesta con órdenes cortas que no tienen nada que ver («poné música», «subí el volumen»). Para las reglas, una respuesta corta es una respuesta. Si en la charla real pasa seguido, el paso siguiente es un chequeo barato con salida estructurada solo para esos casos (¿la contestó?, con la cita palabra por palabra validada en código, como el carácter y el observador).
+
+## Sin cupo
+
+Cuando la suscripción de Claude llega a su límite de uso, Wawi lo dice sola, sin el cerebro, con la hora del reinicio: «Uy, me quedé sin cupo hasta las 18:00. Te aviso cuando vuelva.» Una vez. Si el dueño le habla de nuevo durante el límite, contesta al toque «Sigo sin cupo hasta las 18:00, aguantame.». Cuando vuelve, y solo si el dueño se había enterado, lo dice con sus palabras, por el portón («¡Volví!»). Los detalles están en `docs/ARCHITECTURE.md`, «Sin cupo». Las frases son `Phrases::limit_*` en el núcleo.
+
 ## Velocidad
 
 Nada de esto está en el camino del turno del dueño:
@@ -264,6 +306,8 @@ Nada de esto está en el camino del turno del dueño:
 - El alma y el prompt de sistema no cambian de un turno a otro.
 - El aprendizaje corre en el proceso del plugin, en su hilo, con una cola que nunca espera.
 - La curiosidad es solo iniciativa, y el dueño la corta en el acto. La imagen nunca entra a la sesión del cerebro, así que no agranda los turnos siguientes.
+- Las preguntas pendientes: una cuenta en memoria al terminar cada turno, y un archivo chico en la cola cuando una queda sin respuesta.
+- Sin cupo, el dueño recibe la frase local al toque, en vez de esperar a un cerebro que lo van a rechazar.
 
 ## Lo que falta
 
