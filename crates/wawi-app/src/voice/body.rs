@@ -5,8 +5,9 @@
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use wawi_body::{BodyLink, Command, Flash, Mood, Update};
+use wawi_body::{BodyLink, Command, Flash, Mood, SecretAsk, SecretReply, Update};
 use wawi_core::State;
+use wawi_plugins::control::KeyPrompt;
 
 /// The host's side of the body: sends each change once.
 pub struct Reporter {
@@ -43,6 +44,22 @@ impl Reporter {
 
     pub fn flash(&self, flash: Flash) {
         self.link.send(Update::Flash(flash));
+    }
+
+    /// Shows plugin key prompts as the body's secure dialog. The key goes
+    /// from the dialog straight to the plugin host's answer (the Keychain);
+    /// the voice program never sees it.
+    pub fn key_prompter(&self) -> wawi_plugins::control::KeyPrompter {
+        let link = self.link.clone();
+        Box::new(move |prompt: KeyPrompt| {
+            let answer = prompt.answer.clone();
+            link.send(Update::AskSecret(SecretAsk {
+                title: prompt.title,
+                message: prompt.message,
+                help_url: prompt.help,
+                reply: SecretReply(std::sync::Arc::new(move |key| answer.answer(key))),
+            }));
+        })
     }
 }
 
@@ -91,6 +108,8 @@ impl Controls {
                 link.send(Update::Muted(!listening));
             }
             Command::Quit => self.quit.store(true, Ordering::SeqCst),
+            // The settings window is not there yet: a hook for it.
+            Command::OpenSettings => {}
         }
     }
 }
@@ -164,6 +183,42 @@ mod tests {
         controls.apply(Command::Quit, &link);
         assert!(QUIT.load(Ordering::SeqCst));
         assert!(rx.try_recv().is_err(), "the program closes the body itself");
+    }
+
+    #[test]
+    fn a_key_prompt_becomes_the_bodys_secure_dialog() {
+        let (link, rx) = BodyLink::detached();
+        let reporter = Reporter::new(link);
+        let got = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let sink = got.clone();
+        let prompter = reporter.key_prompter();
+        prompter(KeyPrompt {
+            plugin: "linear".into(),
+            title: "Clave de Linear".into(),
+            message: "Pegá tu clave.".into(),
+            help: Some("https://linear.app/settings".into()),
+            answer: wawi_plugins::control::KeyAnswer::new(move |key| {
+                *sink.lock().unwrap() = key;
+            }),
+        });
+        let Ok(Update::AskSecret(ask)) = rx.try_recv() else {
+            panic!("no dialog");
+        };
+        assert_eq!(ask.title, "Clave de Linear");
+        assert_eq!(ask.help_url.as_deref(), Some("https://linear.app/settings"));
+        (ask.reply.0)(Some("lin_api_x".into()));
+        assert_eq!(got.lock().unwrap().as_deref(), Some("lin_api_x"));
+        assert!(!format!("{ask:?}").contains("lin_api_x"));
+    }
+
+    #[test]
+    fn settings_is_a_hook_for_now() {
+        static QUIT: AtomicBool = AtomicBool::new(false);
+        let controls = Controls::new(&QUIT);
+        let (link, rx) = BodyLink::detached();
+        controls.apply(Command::OpenSettings, &link);
+        assert!(rx.try_recv().is_err());
+        assert!(!QUIT.load(Ordering::SeqCst) && !controls.deaf());
     }
 
     #[test]

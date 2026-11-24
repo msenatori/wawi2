@@ -16,6 +16,8 @@ pub enum MenuItem {
     /// «Quedate quieta» / «Podés moverte»: gravity and wandering, for a pet
     /// with a body.
     Still,
+    /// «Ajustes…»: the settings window (plugins and more).
+    Settings,
     /// «Abrir registros»: Finder at `~/.wawi2/logs`.
     OpenLogs,
     /// «Salir»: the same clean exit as Enter or Ctrl+C.
@@ -29,6 +31,7 @@ pub const LAYOUT: &[Option<MenuItem>] = &[
     Some(MenuItem::Still),
     Some(MenuItem::Pets),
     None,
+    Some(MenuItem::Settings),
     Some(MenuItem::OpenLogs),
     None,
     Some(MenuItem::Quit),
@@ -81,6 +84,7 @@ impl MenuItem {
             MenuItem::Still if state.moving => "Quedate quieta".into(),
             MenuItem::Still => "Podés moverte".into(),
             MenuItem::Pets => PETS_TITLE.into(),
+            MenuItem::Settings => "Ajustes…".into(),
             MenuItem::OpenLogs => "Abrir registros".into(),
             MenuItem::Quit => "Salir".into(),
         }
@@ -92,6 +96,7 @@ impl MenuItem {
             MenuItem::ShowHide => Action::ToggleVisible,
             MenuItem::Still => Action::ToggleMovement,
             MenuItem::Pets => Action::Submenu,
+            MenuItem::Settings => Action::Host(Command::OpenSettings),
             MenuItem::OpenLogs => Action::OpenLogs,
             MenuItem::Quit => Action::Host(Command::Quit),
         }
@@ -106,6 +111,7 @@ impl MenuItem {
             MenuItem::Quit => 4,
             MenuItem::Pets => 5,
             MenuItem::Still => 6,
+            MenuItem::Settings => 7,
         }
     }
 
@@ -178,6 +184,11 @@ mod tests {
         assert_eq!(MenuItem::ShowHide.title(ON), "Ocultar a Wawi");
         assert_eq!(MenuItem::ShowHide.title(OFF), "Mostrar a Wawi");
         assert_eq!(MenuItem::OpenLogs.action(OFF), Action::OpenLogs);
+        assert_eq!(MenuItem::Settings.title(ON), "Ajustes…");
+        assert_eq!(
+            MenuItem::Settings.action(ON),
+            Action::Host(Command::OpenSettings)
+        );
     }
 
     #[test]

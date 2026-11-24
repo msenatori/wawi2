@@ -2,12 +2,16 @@
 # trato: estilo, no datos) y lo guarda en <home>/trato.md, que podés leer,
 # editar o borrar. La referencia completa está en docs/PERSONALIDAD.md.
 #
-# Instalarlo:
+# Es un plugin de Wawi: viene con ella, apagado. Para prenderlo, decile
+# «Wawi, conectá el carácter». Wawi copia esta carpeta a ~/.wawi2/plugins/caracter
+# y lo arranca, sin reiniciar. Necesita su programa, `wawi-caracter`:
+#   cargo build --release -p wawi-caracter     (queda junto a wawi2)
+# o
 #   cargo install --path crates/wawi-caracter --locked
-#   cp -r plugins/caracter ~/.wawi2/plugins/caracter
 #
-# `wawi-caracter` tiene que estar en el PATH de Wawi (~/.cargo/bin), o poné
-# el camino entero en command.
+# Wawi busca `wawi-caracter` primero junto a wawi2 (en la app, en
+# Contents/MacOS) y después en el PATH. También podés poner el camino
+# entero en command.
 
 description = "El trato: cómo le gusta al dueño que Wawi le hable."
 timeout = "10s"

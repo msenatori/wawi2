@@ -11,10 +11,15 @@ use std::time::{Duration, Instant};
 use serde_json::Value;
 use wawi_core::{Event, ToolOutcome, TurnId};
 
+use crate::catalog;
 use crate::feed::FeedItem;
+use crate::keychain::{OAUTH_ACCOUNT, Vault};
 use crate::log::CallLog;
-use crate::manifest::{FEED_TOOL, Manifest, Server, truncate};
-use crate::mcp::{Client, HttpTransport, McpError, OnNotify, StdioSpec, StdioTransport, Transport};
+use crate::manifest::{Auth, FEED_TOOL, Manifest, Server, truncate};
+use crate::mcp::{
+    Bearer, Client, HttpTransport, McpError, OnNotify, StdioSpec, StdioTransport, Transport,
+};
+use crate::oauth::{self, Grant, RefreshError};
 use crate::secrets::Secrets;
 use crate::tool::specs_for;
 use crate::{HostOptions, PUSH_METHOD, PluginEvent, PluginSink};
@@ -43,7 +48,18 @@ pub(crate) enum Job {
     Closed {
         generation: u64,
     },
+    /// The credential changed (a login, a key): drop the connection and
+    /// connect again now.
+    Reconnect,
     Shutdown,
+}
+
+/// Why a connection could not be made.
+enum Fail {
+    /// The server wants a (new) credential: wait for the owner.
+    Auth(String),
+    /// Anything else: retry with backoff.
+    Other(String),
 }
 
 pub(crate) type FeedQueue = Arc<Mutex<VecDeque<FeedItem>>>;
@@ -56,6 +72,13 @@ pub(crate) struct Worker {
     pub jobs: Sender<Job>,
     pub options: HostOptions,
     pub feed: FeedQueue,
+    vault: Vault,
+    /// The OAuth grant in use (read from the Keychain on this thread).
+    grant: Option<Grant>,
+    /// What the HTTP transport sends as `Authorization: Bearer`.
+    bearer: Bearer,
+    /// Waiting for the owner to connect it: no retries until `Reconnect`.
+    parked: bool,
     client: Option<Client>,
     generation: u64,
     failures: u32,
@@ -64,6 +87,7 @@ pub(crate) struct Worker {
 }
 
 impl Worker {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         manifest: Manifest,
         secrets: Secrets,
@@ -72,6 +96,7 @@ impl Worker {
         jobs: Sender<Job>,
         options: HostOptions,
         feed: FeedQueue,
+        vault: Vault,
     ) -> Self {
         Self {
             manifest,
@@ -81,6 +106,10 @@ impl Worker {
             jobs,
             options,
             feed,
+            vault,
+            grant: None,
+            bearer: Arc::default(),
+            parked: false,
             client: None,
             generation: 0,
             failures: 0,
@@ -96,7 +125,7 @@ impl Worker {
     pub fn run(mut self, rx: Receiver<Job>) {
         self.connect();
         loop {
-            let job = if self.client.is_some() {
+            let job = if self.client.is_some() || self.parked {
                 match rx.recv() {
                     Ok(job) => job,
                     Err(_) => break,
@@ -122,13 +151,104 @@ impl Worker {
                         self.fail("el proceso del plugin terminó".into());
                     }
                 }
+                Job::Reconnect => {
+                    self.client = None;
+                    self.parked = false;
+                    self.failures = 0;
+                    self.grant = None;
+                    self.connect();
+                }
                 Job::Relist { .. } | Job::Closed { .. } => {}
             }
         }
         self.log.line(&format!("{} cerrado", self.name()));
     }
 
-    fn transport(&self, generation: u64) -> Result<Box<dyn Transport>, String> {
+    /// The secrets this connection resolves `${NAME}` with: a Keychain key
+    /// first (only this plugin's own item), then secrets.toml and the
+    /// environment.
+    fn credentials(&mut self) -> Result<Secrets, Fail> {
+        match self.manifest.auth.clone() {
+            Auth::None => Ok(self.secrets.clone()),
+            Auth::Key { name, .. } => {
+                let stored = self
+                    .vault
+                    .get(&name)
+                    .map_err(|e| Fail::Other(e.to_string()))?;
+                match stored {
+                    Some(value) => {
+                        self.secrets.remember(&value);
+                        Ok(self.secrets.with_value(&name, &value))
+                    }
+                    // Legacy: secrets.toml or the environment still work.
+                    None if self.secrets.resolve(&format!("${{{name}}}")).is_ok() => {
+                        Ok(self.secrets.clone())
+                    }
+                    None => Err(Fail::Auth("falta la clave".into())),
+                }
+            }
+            Auth::OAuth { .. } => {
+                if self.grant.is_none() {
+                    let stored = self
+                        .vault
+                        .get(OAUTH_ACCOUNT)
+                        .map_err(|e| Fail::Other(e.to_string()))?;
+                    self.grant = stored.as_deref().and_then(Grant::from_json);
+                }
+                if self.grant.is_none() {
+                    return Err(Fail::Auth("todavía no le diste permiso".into()));
+                }
+                if self.grant.as_ref().is_some_and(|g| g.stale(oauth::now_s())) {
+                    self.refresh()?;
+                }
+                self.arm_bearer();
+                Ok(self.secrets.clone())
+            }
+        }
+    }
+
+    fn arm_bearer(&self) {
+        let token = self.grant.as_ref().map(|g| g.access_token.clone());
+        if let Some(token) = &token {
+            self.secrets.remember(token);
+        }
+        if let Ok(mut slot) = self.bearer.lock() {
+            *slot = token;
+        }
+    }
+
+    /// Renews the OAuth token (on this thread) and keeps the new grant,
+    /// rotated refresh token included. Revoked: the grant is forgotten.
+    fn refresh(&mut self) -> Result<(), Fail> {
+        let Some(grant) = self.grant.clone() else {
+            return Err(Fail::Auth("todavía no le diste permiso".into()));
+        };
+        match oauth::refresh(&grant) {
+            Ok(fresh) => {
+                if let Some(token) = &fresh.refresh_token {
+                    self.secrets.remember(token);
+                }
+                if let Err(error) = self.vault.set(OAUTH_ACCOUNT, &fresh.to_json()) {
+                    self.log.line(&format!(
+                        "{}: no pude guardar el permiso renovado: {error}",
+                        self.name()
+                    ));
+                }
+                self.log.line(&format!("{} permiso renovado", self.name()));
+                self.grant = Some(fresh);
+                self.arm_bearer();
+                Ok(())
+            }
+            Err(RefreshError::Revoked(why)) => {
+                self.grant = None;
+                let _ = self.vault.delete(OAUTH_ACCOUNT);
+                Err(Fail::Auth(why))
+            }
+            Err(RefreshError::Transient(why)) => Err(Fail::Other(why)),
+        }
+    }
+
+    fn transport(&self, generation: u64, secrets: &Secrets) -> Result<Box<dyn Transport>, String> {
         let plugin = self.name().to_owned();
         let sink = self.sink.clone();
         let jobs = self.jobs.clone();
@@ -153,9 +273,14 @@ impl Worker {
                 other => log.line(&format!("{plugin} aviso {other} (ignorado)")),
             }
         });
-        let resolve = |text: &str| self.secrets.resolve(text);
+        let resolve = |text: &str| secrets.resolve(text);
         match &self.manifest.server {
             Server::Stdio { command, args, env } => {
+                // Wawi's own programs: beside wawi2 first, then the PATH.
+                let command = catalog::resolve_command(command, &self.manifest.dir)
+                    .map(|path| path.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| command.clone());
+                let command = &command;
                 let args = args
                     .iter()
                     .map(|a| resolve(a))
@@ -193,26 +318,71 @@ impl Worker {
             }
             Server::Http { url, headers } => {
                 let url = resolve(url)?;
-                let headers = headers
+                let mut resolved = headers
                     .iter()
                     .map(|(k, v)| Ok((k.clone(), resolve(v)?)))
                     .collect::<Result<Vec<_>, String>>()?;
-                Ok(Box::new(HttpTransport::new(&url, headers, on_notify)))
+                let transport = match &self.manifest.auth {
+                    Auth::OAuth { .. } => {
+                        resolved.retain(|(k, _)| !k.eq_ignore_ascii_case("authorization"));
+                        HttpTransport::new(&url, resolved, on_notify)
+                            .with_bearer(self.bearer.clone())
+                    }
+                    Auth::Key { name, .. } => {
+                        let reference = format!("${{{name}}}");
+                        if !headers.values().any(|v| v.contains(&reference)) {
+                            resolved.push((
+                                "Authorization".into(),
+                                format!("Bearer {}", resolve(&reference)?),
+                            ));
+                        }
+                        HttpTransport::new(&url, resolved, on_notify)
+                    }
+                    Auth::None => HttpTransport::new(&url, resolved, on_notify),
+                };
+                Ok(Box::new(transport))
             }
         }
     }
 
-    fn connect(&mut self) {
-        self.generation += 1;
-        let generation = self.generation;
+    fn try_connect(&mut self) -> Result<(Client, Vec<crate::mcp::RemoteTool>), Fail> {
         let timeout = self.manifest.timeout;
-        let connected = self
-            .transport(generation)
-            .and_then(|transport| Client::connect(transport, timeout).map_err(|e| e.to_string()))
-            .and_then(|mut client| {
-                let listed = client.list_tools(timeout).map_err(|e| e.to_string())?;
+        // One more try after renewing an OAuth token the server refused.
+        for attempt in 0..2 {
+            let secrets = self.credentials()?;
+            self.generation += 1;
+            let generation = self.generation;
+            let transport = self.transport(generation, &secrets).map_err(Fail::Other)?;
+            let connected = Client::connect(transport, timeout).and_then(|mut client| {
+                let listed = client.list_tools(timeout)?;
                 Ok((client, listed))
             });
+            match connected {
+                Ok(done) => return Ok(done),
+                Err(McpError::Unauthorized { .. })
+                    if attempt == 0 && matches!(self.manifest.auth, Auth::OAuth { .. }) =>
+                {
+                    self.refresh()?;
+                }
+                Err(McpError::Unauthorized { status, .. }) => {
+                    return Err(Fail::Auth(match self.manifest.auth {
+                        Auth::Key { .. } => format!("el servidor rechazó la clave (HTTP {status})"),
+                        _ => format!("el servidor pide permiso (HTTP {status})"),
+                    }));
+                }
+                Err(other) => return Err(Fail::Other(other.to_string())),
+            }
+        }
+        Err(Fail::Auth("el servidor rechazó el permiso".into()))
+    }
+
+    fn connect(&mut self) {
+        let connected = self.try_connect();
+        let connected = match connected {
+            Ok(done) => Ok(done),
+            Err(Fail::Auth(reason)) => return self.park(reason),
+            Err(Fail::Other(reason)) => Err(reason),
+        };
         match connected {
             Ok((client, listed)) => {
                 let tools = specs_for(&self.manifest, &listed);
@@ -250,6 +420,21 @@ impl Worker {
         }
     }
 
+    /// Waits for the owner: no retries until a `Reconnect`. The host shows
+    /// it as «Desconectado».
+    fn park(&mut self, reason: String) {
+        self.client = None;
+        self.parked = true;
+        let reason = self.secrets.scrub(&reason);
+        self.log
+            .line(&format!("{} desconectado: {reason}", self.name()));
+        self.last_error = reason.clone();
+        self.sink.plugin(PluginEvent::NeedsAuth {
+            plugin: self.name().to_owned(),
+            reason,
+        });
+    }
+
     /// Drops the connection and waits longer each time before retrying.
     fn fail(&mut self, reason: String) {
         self.client = None;
@@ -270,14 +455,41 @@ impl Worker {
     }
 
     fn handle_error(&mut self, error: McpError) {
-        if let McpError::Dead(why) = error {
-            self.fail(why);
+        match error {
+            McpError::Dead(why) => self.fail(why),
+            McpError::Unauthorized { .. } if self.parked => {}
+            McpError::Unauthorized { status, .. } => {
+                self.park(format!("el servidor rechazó la credencial (HTTP {status})"))
+            }
+            McpError::Timeout | McpError::Rpc(_) => {}
+        }
+    }
+
+    /// Before a call: renew a token about to expire. False if the plugin
+    /// had to be parked or dropped.
+    fn fresh_enough(&mut self) -> bool {
+        if !self.grant.as_ref().is_some_and(|g| g.stale(oauth::now_s())) {
+            return true;
+        }
+        match self.refresh() {
+            Ok(()) => true,
+            Err(Fail::Auth(why)) => {
+                self.park(why);
+                false
+            }
+            Err(Fail::Other(why)) => {
+                self.fail(why);
+                false
+            }
         }
     }
 
     fn call(&mut self, origin: Origin, tool: &str, args: Value) {
-        if self.client.is_none() && Instant::now() >= self.next_try {
+        if self.client.is_none() && !self.parked && Instant::now() >= self.next_try {
             self.connect();
+        }
+        if self.client.is_some() {
+            self.fresh_enough();
         }
         let from = match &origin {
             Origin::Brain { turn, .. } => format!("cerebro turno {}", turn.0),
@@ -286,12 +498,19 @@ impl Worker {
         let timeout = self.manifest.timeout;
         let Some(client) = self.client.as_mut() else {
             let wait = self.next_try.saturating_duration_since(Instant::now());
-            let reason = format!(
-                "el plugin {} no está disponible ({}); reintento en {} s",
-                self.manifest.name,
-                self.last_error,
-                wait.as_secs_f32().ceil()
-            );
+            let reason = if self.parked {
+                format!(
+                    "el plugin {} está desconectado ({}). El dueño lo conecta diciendo «conectá {}» o desde Ajustes",
+                    self.manifest.name, self.last_error, self.manifest.name
+                )
+            } else {
+                format!(
+                    "el plugin {} no está disponible ({}); reintento en {} s",
+                    self.manifest.name,
+                    self.last_error,
+                    wait.as_secs_f32().ceil()
+                )
+            };
             self.log.line(&format!(
                 "{} {tool} desde {from}: no disponible",
                 self.manifest.name
@@ -299,7 +518,23 @@ impl Worker {
             return self.respond(origin, Err(reason));
         };
         let started = Instant::now();
-        let result = client.call(tool, args, timeout);
+        let mut result = client.call(tool, args.clone(), timeout);
+        if matches!(result, Err(McpError::Unauthorized { .. }))
+            && matches!(self.manifest.auth, Auth::OAuth { .. })
+        {
+            // The token was refused before its time: renew once and retry.
+            result = match self.refresh() {
+                Ok(()) => match self.client.as_mut() {
+                    Some(client) => client.call(tool, args, timeout),
+                    None => result,
+                },
+                Err(Fail::Auth(why)) => {
+                    self.park(why);
+                    result
+                }
+                Err(Fail::Other(_)) => result,
+            };
+        }
         let ms = started.elapsed().as_millis();
         let outcome = match result {
             Ok(result) => {

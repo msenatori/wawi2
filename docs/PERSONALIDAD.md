@@ -151,7 +151,7 @@ Leelo con cuidado: son 36 charlas cortas y claras, escritas por el mismo que esc
 ### Cómo prenderlo
 
 1. `cargo install --path crates/wawi-caracter --locked`
-2. `cp -r plugins/caracter ~/.wawi2/plugins/caracter`
+2. Decile «Wawi, conectá el carácter»: Wawi lo instala sola.
 3. Corré el banco y mirá los números.
 4. Si te convencen, poné `observa_charla = true` en `~/.wawi2/plugins/caracter/plugin.toml` y reabrí Wawi.
 
@@ -249,7 +249,7 @@ Ese tiempo es de la herramienta: el cerebro después dice su frase. En una mirad
 ### Cómo prenderla y apagarla
 
 1. `cargo install --path crates/wawi-curiosidad --locked`
-2. `cp -r plugins/curiosidad ~/.wawi2/plugins/curiosidad`
+2. Decile «Wawi, conectá la curiosidad»: Wawi lo instala sola.
 3. Dale el permiso de Grabación de pantalla a la app desde la que corrés Wawi (Ajustes del Sistema, Privacidad y seguridad, Grabación de pantalla) y reabrí Wawi. Sin el permiso no mira y lo dice.
 4. `wawi-curiosidad senales` muestra qué ve de la Mac ahora, sin capturar nada. `wawi-curiosidad medir IMAGEN` mide una mirada con un archivo (gasta una llamada).
 

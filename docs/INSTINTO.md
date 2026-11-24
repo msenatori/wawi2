@@ -56,8 +56,8 @@ El worker corre dentro del proceso del plugin (`wawi-instinto mcp`) o solo (`waw
    ```
 
    Queda en `~/.cargo/bin/wawi-instinto`. Tiene que estar en el PATH con el que abrís Wawi. Si no, poné el camino entero en `command` de `plugin.toml`.
-2. Copiá el plugin: `cp -r plugins/instinto ~/.wawi2/plugins/instinto`.
-3. Abrí Wawi. Al arrancar dice `plugins: instinto`.
+2. Prendé el plugin: decile «Wawi, conectá el instinto». Wawi lo instala sola.
+3. Arranca sin reiniciar. Desde ahí, al abrir Wawi dice `plugins: instinto`.
 
 Para el observador, ver «El observador» más abajo. Viene apagado.
 

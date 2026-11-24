@@ -24,6 +24,10 @@ pub const PROTOCOL_VERSION: &str = "2025-06-18";
 /// The largest reply read from a remote server.
 const MAX_BODY: u64 = 8 * 1024 * 1024;
 
+/// The OAuth access token an [`HttpTransport`] sends, shared with whoever
+/// refreshes it (the plugin's worker), so a refresh needs no reconnect.
+pub type Bearer = Arc<Mutex<Option<String>>>;
+
 /// Called with `(method, params)` for every notification the server sends.
 pub type OnNotify = Arc<dyn Fn(&str, &Value) + Send + Sync>;
 
@@ -35,6 +39,12 @@ pub enum McpError {
     Dead(String),
     /// The server answered with a JSON-RPC error.
     Rpc(String),
+    /// HTTP 401 or 403: the credential is missing, expired or revoked. Holds
+    /// the `WWW-Authenticate` header (for OAuth discovery), if any.
+    Unauthorized {
+        status: u16,
+        www_authenticate: String,
+    },
 }
 
 impl std::fmt::Display for McpError {
@@ -43,6 +53,9 @@ impl std::fmt::Display for McpError {
             McpError::Timeout => write!(f, "tardó demasiado"),
             McpError::Dead(why) => write!(f, "se cortó la conexión: {why}"),
             McpError::Rpc(why) => write!(f, "{why}"),
+            McpError::Unauthorized { status, .. } => {
+                write!(f, "el servidor rechazó la credencial (HTTP {status})")
+            }
         }
     }
 }
@@ -264,6 +277,7 @@ pub struct HttpTransport {
     agent: ureq::Agent,
     url: String,
     headers: Vec<(String, String)>,
+    bearer: Option<Bearer>,
     session: Option<String>,
     protocol: Option<String>,
     on_notify: OnNotify,
@@ -271,6 +285,13 @@ pub struct HttpTransport {
 }
 
 impl HttpTransport {
+    /// With a token slot: every request carries `Authorization: Bearer`
+    /// with whatever the slot holds then.
+    pub fn with_bearer(mut self, bearer: Bearer) -> Self {
+        self.bearer = Some(bearer);
+        self
+    }
+
     pub fn new(url: &str, headers: Vec<(String, String)>, on_notify: OnNotify) -> Self {
         let agent: ureq::Agent = ureq::Agent::config_builder()
             .http_status_as_error(false)
@@ -280,6 +301,7 @@ impl HttpTransport {
             agent,
             url: url.to_owned(),
             headers,
+            bearer: None,
             session: None,
             protocol: None,
             on_notify,
@@ -304,6 +326,13 @@ impl HttpTransport {
         for (name, value) in &self.headers {
             request = request.header(name.as_str(), value.as_str());
         }
+        let token = self
+            .bearer
+            .as_ref()
+            .and_then(|slot| slot.lock().ok().and_then(|t| t.clone()));
+        if let Some(token) = token {
+            request = request.header("Authorization", format!("Bearer {token}"));
+        }
         if let Some(session) = &self.session {
             request = request.header("Mcp-Session-Id", session.as_str());
         }
@@ -327,9 +356,16 @@ impl HttpTransport {
         match status {
             200..=299 => {}
             401 | 403 => {
-                return Err(McpError::Dead(format!(
-                    "el servidor rechazó la credencial (HTTP {status})"
-                )));
+                let www_authenticate = response
+                    .headers()
+                    .get("www-authenticate")
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or("")
+                    .to_owned();
+                return Err(McpError::Unauthorized {
+                    status,
+                    www_authenticate,
+                });
             }
             404 if self.session.is_some() => {
                 self.session = None;

@@ -162,6 +162,7 @@ pub fn main(hold: Option<DemoLook>, home: Option<PathBuf>, pet: Option<PathBuf>)
     let on_command = Box::new(|command, link: &BodyLink| match command {
         Command::SetListening(listening) => link.send(Update::Muted(!listening)),
         Command::Quit => QUIT.store(true, Ordering::SeqCst),
+        Command::OpenSettings => {}
     });
     let mut config = body_config(home.as_deref());
     config.pet_dir = pet.or(config.pet_dir);

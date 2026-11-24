@@ -1,17 +1,20 @@
-# Plugin de Linear para Wawi 2.
+# Linear para Wawi 2: un ejemplo y una plantilla de conector externo.
 #
-# Instalarlo: copiá esta carpeta a ~/.wawi2/plugins/linear (o a
-# $WAWI2_HOME/plugins/linear) y poné tu clave en ~/.wawi2/secrets.toml:
+# No viene instalado. Para usarlo no hace falta copiar nada: decile a Wawi
+# «conectá Linear» (o agregalo desde Ajustes). Wawi crea su carpeta en
+# ~/.wawi2/plugins/linear a partir de este archivo, te abre Linear en el
+# navegador y vos le das permiso. El permiso queda en el llavero de macOS.
 #
-#     LINEAR_API_KEY = "lin_api_..."
+# Los horarios y los textos de abajo son de la rutina del dueño (el equipo
+# Life): en tu copia, cambialos cuando quieras. Wawi la lee al conectar.
 #
-# con permisos 600 (chmod 600 ~/.wawi2/secrets.toml). La clave se crea en
-# Linear: Settings > Account > Security & access > Personal API keys.
-# Wawi la manda como "Authorization: Bearer ...", que el servidor MCP de
-# Linear acepta en lugar del login interactivo.
+# Si preferís una clave personal de API en lugar del login (avanzado),
+# cambiá auth por:
 #
-# Los horarios y los textos son tuyos: cambialos cuando quieras. Wawi los
-# lee al arrancar.
+#     auth = { clave = "LINEAR_API_KEY", ayuda = "https://linear.app/settings/account/security" }
+#
+# y Wawi te la pide en una ventanita segura. Se crea en Linear: Settings >
+# Account > Security & access > Personal API keys.
 
 description = "Tu rutina en Linear: el equipo Life, con una columna por día."
 # Hasta 30 s por llamada; Linear a veces tarda.
@@ -19,9 +22,11 @@ timeout = "30s"
 # Solo las herramientas de abajo llegan al cerebro: la lista queda corta.
 expose = "listed"
 
+# El login de Linear (OAuth): «Conectar» abre el navegador.
+auth = "oauth"
+
 [server]
 url = "https://mcp.linear.app/mcp"
-headers = { Authorization = "Bearer ${LINEAR_API_KEY}" }
 
 # Lectura: Wawi las usa sin preguntar, también por su cuenta.
 [tools.list_issues]

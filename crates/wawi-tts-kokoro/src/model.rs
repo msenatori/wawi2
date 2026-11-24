@@ -191,7 +191,7 @@ pub fn ensure(spec: &ModelSpec, dir: &Path, say: &mut dyn FnMut(&str)) -> Result
         .collect();
     let bytes: u64 = needed.iter().map(|f| f.size).sum();
     say(&format!(
-        "Downloading the voice model {} ({} MB, license {}) to {}. Only this once.",
+        "Bajando el modelo {} ({} MB, licencia {}) a {}. Es una sola vez.",
         spec.dir_name,
         bytes / 1_000_000,
         spec.license,

@@ -85,6 +85,13 @@ pub fn microphone_help() -> String {
 
 /// The app macOS will ask about, as the owner sees it in System Settings.
 pub fn launching_app() -> String {
+    // Opened as Wawi.app (no terminal), the app itself is the one macOS asks
+    // about.
+    let in_bundle = std::env::current_exe()
+        .is_ok_and(|exe| exe.to_string_lossy().contains(".app/Contents/MacOS/"));
+    if in_bundle && std::env::var_os("TERM_PROGRAM").is_none() {
+        return "la app Wawi".to_owned();
+    }
     let program = std::env::var("TERM_PROGRAM").unwrap_or_default();
     let name = match program.as_str() {
         "Apple_Terminal" => "Terminal",

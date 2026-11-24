@@ -254,7 +254,7 @@ Viene **apagado**. Apagado igual anota los problemas (no cuesta nada) pero nunca
    cargo install --path crates/wawi-autoarreglo --locked
    ```
 
-2. Copiá el plugin: `cp -r plugins/autoarreglo ~/.wawi2/plugins/autoarreglo`.
+2. Prendé el plugin: decile «Wawi, conectá el autoarreglo». Wawi lo instala sola.
 3. Hacé el primer commit del repo, si todavía no lo tiene.
 4. Escribí `~/.wawi2/autoarreglo/config.toml`:
 

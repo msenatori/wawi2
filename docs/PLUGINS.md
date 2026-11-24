@@ -20,7 +20,7 @@ Esta guía es para quien escribe un plugin. Está en `docs/PLUGINS.md` del repos
     <nombre>/
       plugin.toml         obligatorio
       instrucciones.md    opcional
-  secrets.toml            tus claves (permisos 600)
+  secrets.toml            claves viejas (opcional, permisos 600)
   logs/plugins.log        cada llamada, sin secretos
   cola/hechos/            la cola de avisos (ver más abajo)
   cola/preguntas/         la cola de preguntas (ver más abajo)
@@ -29,7 +29,46 @@ Esta guía es para quien escribe un plugin. Está en `docs/PLUGINS.md` del repos
 
 `<home>` es `$WAWI2_HOME` o, si no está, `~/.wawi2`.
 
-Wawi lee los plugins al arrancar. Una carpeta cuyo nombre empieza con `.` o `_` se ignora. Un `plugin.toml` con errores se salta y el problema se muestra al arrancar.
+Wawi lee los plugins al arrancar. Un plugin que se conecta o se prende después carga en caliente, sin reiniciar. Una carpeta cuyo nombre empieza con `.` o `_` se ignora. Un `plugin.toml` con errores se salta y el problema se muestra al arrancar.
+
+Nadie tiene que copiar estas carpetas a mano: Wawi las crea al conectar un plugin (ver «Conectar un plugin»).
+
+## Conectar un plugin
+
+Conectar tiene que ser fácil, como los conectores de Claude.ai: un clic o una frase, el navegador, y listo.
+
+Hay dos clases de plugins:
+
+- **Los de Wawi**: `instinto`, `caracter`, `curiosidad` y `autoarreglo`. Vienen con Wawi, en el catálogo (`plugins/` en el código, `$WAWI2_ASSETS/plugins` o `Wawi.app/Contents/Resources/plugins`). Arrancan apagados. Prenderlo copia su carpeta a `<home>/plugins` y lo arranca.
+- **Los conectores**: servidores MCP remotos, como Linear. Se agregan desde una dirección. Wawi trae una lista corta de sugeridos en `assets/catalogo/sugeridos.toml` (nombre, título, dirección, descripción, ícono y una plantilla opcional). Ninguno viene instalado.
+
+### Por voz
+
+- «Wawi, conectá Linear». Vale el nombre de un plugin instalado, uno de Wawi, uno sugerido o una dirección: «conectá https://ejemplo.com/mcp».
+- «¿Qué plugins tenés?» lista los conectados, los desconectados, los apagados y los que se pueden agregar.
+
+Son dos herramientas de base: `conectar(plugin)` y `plugins()`. Las dos son solo para los turnos del dueño; la iniciativa no las puede usar. `conectar` no pide confirmación: la confirmación es el permiso en el navegador o la clave que pegás.
+
+### Qué hace «Conectar»
+
+1. Si es una dirección nueva, Wawi la revisa. Si el servidor publica la metadata de OAuth de MCP, usa el login. Si contesta 401 sin esa metadata, usa una clave. Si contesta sin pedir nada, no usa nada. Después escribe `<home>/plugins/<nombre>/plugin.toml` sola. Un sugerido con plantilla parte de esa carpeta (Linear trae sus horarios).
+2. **OAuth**: Wawi abre tu navegador en la página del servicio. Le das permiso. El navegador vuelve a Wawi y muestra «Listo, ya podés volver a Wawi». Wawi dice «Te abrí Linear en el navegador para que me des permiso» y, cuando termina, avisa que quedó conectado.
+3. **Clave**: Wawi abre una ventanita segura con el nombre del plugin, un campo oculto y un botón «Dónde la consigo». La clave va directo al llavero. No pasa por el cerebro, ni por el registro, ni se muestra.
+4. El plugin carga en caliente. Sus herramientas aparecen sin reiniciar y el cerebro se prepara de fondo: ningún turno espera.
+
+### Los estados
+
+| Estado | Quiere decir |
+| --- | --- |
+| Conectado | anda; sus herramientas están |
+| Conectando | arrancando, o esperando el navegador o la clave |
+| Desconectado | falta tu permiso: nunca lo diste, lo sacaste, o el servicio lo revocó |
+| Apagado | apagado, o uno de Wawi sin instalar |
+| Error | falta su programa, o se cae seguido |
+
+«Desconectar» borra el permiso del llavero (y le avisa al servicio que lo olvide). El plugin queda instalado. «Apagar» lo deja quieto sin borrar nada. «Sacar» lo cierra, borra el permiso y mueve su carpeta a `<home>/plugins/.borrados/`.
+
+Los de Wawi usan un programa propio (`wawi-instinto`, por ejemplo). Wawi lo busca primero junto a `wawi2` (en la app, en `Contents/MacOS`) y después en el PATH. Si falta, el estado es Error y dice cómo conseguirlo. Wawi no lo compila sola.
 
 `instrucciones.md` le dice al cerebro cuándo usar tu plugin. Va al prompt de sistema, bajo «## Plugin <nombre>», con un tope de 4000 letras. Escribilo corto y en castellano. Las instrucciones no dan permisos: los permisos los decide Wawi, en código.
 
@@ -94,6 +133,7 @@ enabled = true            # false lo apaga sin borrarlo
 timeout = "20s"           # tope de cada llamada (por defecto 20s)
 expose = "all"            # "all": todas las herramientas; "listed": solo las de [tools.*]
 observa_charla = false    # true: recibe cada turno terminado (ver «El resumen de cada turno»)
+auth = "oauth"            # cómo se conecta: ver «El campo auth»
 
 [server]
 # Local: un programa. Un camino que empieza con ./ es relativo a la carpeta del plugin.
@@ -149,21 +189,48 @@ Las reglas, aplicadas en código:
 - **La iniciativa** (Wawi por su cuenta: un watch, una rutina, un aviso) solo puede usar herramientas `read` sin confirmación. Si pide otra, el núcleo la rechaza antes de llamarla y el cerebro recibe «la iniciativa solo puede leer; proponelo como sugerencia». Puede proponer la acción con `suggest`, y el dueño la acepta o la descarta.
 - **La confirmación.** Una herramienta con `confirm = true` (el valor por defecto de `act`) no corre hasta que el dueño dice que sí. Wawi pregunta en voz alta: «Voy a usar `<plugin>__<herramienta>`: `<descripción>`. ¿Confirmás? Decime sí o no.» Por eso conviene una `description` corta y en castellano para las de `act`. Un «sí» la ejecuta; un «no», el silencio por 30 s o dos respuestas que no se entienden la cancelan («Listo, no lo hago.»). El «sí» sale solo de lo que dijo el dueño: nada que diga el modelo o un plugin puede aprobar.
 
+## El campo auth
+
+`auth` dice cómo consigue Wawi el permiso del servidor. Si no está, es `"ninguna"`.
+
+```toml
+auth = "oauth"
+```
+
+El login de MCP (OAuth 2.1 con PKCE). Solo para `url`. «Conectar» abre el navegador. Si el servidor no deja que una app se registre sola, poné tu `client_id`:
+
+```toml
+auth = { oauth = true, client_id = "abc123", scopes = ["read", "write"] }
+```
+
+```toml
+auth = { clave = "CLIMA_TOKEN", ayuda = "https://clima.example/claves" }
+```
+
+Una clave que el dueño pega una vez en la ventanita segura. `clave` es su nombre, en MAYÚSCULAS, números y `_`. `ayuda` es la página donde se crea (https). Usala con `${CLIMA_TOKEN}` en `env`, `args`, `url` o `headers`. Si es un servidor `url` y ningún encabezado la usa, Wawi la manda como `Authorization: Bearer`.
+
+```toml
+auth = "ninguna"
+```
+
+Sin permiso.
+
 ## Secretos
 
-Nunca escribas una clave en `plugin.toml`. Escribí una referencia, `${NOMBRE}`, en `env`, `args`, `url` o `headers`. Wawi la busca:
+Nunca escribas una clave ni un token en `plugin.toml`. Wawi los guarda en el llavero de macOS, un ítem por secreto, con el servicio `wawi2.plugin.<nombre>`:
 
-1. en `<home>/secrets.toml`, una tabla de textos:
+- el permiso de OAuth en la cuenta `oauth` (y el cliente registrado en `oauth-cliente`, para no registrarse de nuevo);
+- una clave en una cuenta con su nombre, por ejemplo `LINEAR_API_KEY`.
 
-   ```toml
-   LINEAR_API_KEY = "lin_api_..."
-   CLIMA_TOKEN = "abc"
-   ```
+Cada plugin lee solo sus propios ítems. Wawi los lee en el hilo del plugin, nunca en el de la charla. Los tokens se renuevan solos antes de vencer o ante un 401. Si el servicio rota el token de renovación, Wawi guarda el nuevo. Si el servicio revoca el permiso, Wawi lo borra y marca el plugin «Desconectado».
 
-   Wawi no lo lee si sus permisos son más abiertos que 600. Arreglalo con `chmod 600 ~/.wawi2/secrets.toml`.
-2. en las variables de entorno de Wawi.
+Una referencia `${NOMBRE}` se busca, en orden:
 
-Si falta, el plugin no conecta y el registro dice qué nombre falta, nunca un valor. Los registros tapan con «secreto» cada valor usado y cualquier `Bearer ...`. A un plugin local no le llegan las variables `ANTHROPIC_*` ni `CLAUDE*` de Wawi.
+1. en el llavero, si es la `clave` del `auth` del plugin;
+2. en `<home>/secrets.toml`, una tabla de textos (para plugins viejos; Wawi no lo lee si sus permisos son más abiertos que 600);
+3. en las variables de entorno de Wawi.
+
+Si falta, el plugin queda «Desconectado» (o, sin `auth`, no conecta) y el registro dice qué nombre falta, nunca un valor. Los registros tapan con «secreto» cada valor usado, cada token y cualquier `Bearer ...`. A un plugin local no le llegan las variables `ANTHROPIC_*` ni `CLAUDE*` de Wawi.
 
 ## Watch: mirar sin gastar
 
@@ -351,18 +418,38 @@ Los argumentos:
 
 ## Un ejemplo real: Linear
 
-`plugins/linear/` en el repositorio. Usa el servidor MCP oficial de Linear, `https://mcp.linear.app/mcp`, que acepta una clave personal de API en `Authorization: Bearer <clave>` en lugar del login interactivo.
+`plugins/linear/` en el repositorio es un ejemplo y una plantilla, no un plugin de Wawi. Usa el servidor MCP oficial de Linear, `https://mcp.linear.app/mcp`, con `auth = "oauth"`.
 
-Para activarlo:
+Linear publica todo lo que pide MCP: `/.well-known/oauth-protected-resource/mcp` nombra a `https://mcp.linear.app` como servidor de autorización, y su metadata ofrece registro dinámico (`/register`), PKCE con S256 y el emisor en la respuesta (`iss`).
 
-1. Copiá `plugins/linear` a `~/.wawi2/plugins/linear`.
-2. Creá una clave en Linear (Settings, Account, Security & access, Personal API keys).
-3. Ponela en `~/.wawi2/secrets.toml` como `LINEAR_API_KEY = "lin_api_..."` y hacé `chmod 600 ~/.wawi2/secrets.toml`.
-4. Abrí Wawi. Al arrancar dice `plugins: linear`; las herramientas aparecen cuando conecta.
+Para conectarlo:
 
-Qué trae: lunes a viernes a las 9 mira la columna del día del equipo Life y Wawi te cuenta las tareas y te ayuda a elegir la clave; el sábado a las 10:30, la columna Finde; el viernes a las 18, el cierre de semana. Leer es libre; crear, cambiar o mover una tarea siempre te pregunta. Los horarios y los textos están en `plugin.toml`: cambialos a gusto.
+1. Decí «Wawi, conectá Linear».
+2. En el navegador, entrá a Linear y tocá «Permitir».
+3. Volvé a Wawi.
 
-Si algún día Linear dejara de aceptar la clave en el servidor MCP, hay dos caminos: el login OAuth de MCP (Wawi todavía no lo hace), o un plugin local chico que hable con la API GraphQL de Linear (`https://api.linear.app/graphql`, con la misma clave en `Authorization`) y exponga `list_issues` y `save_issue` por stdio.
+Wawi crea `~/.wawi2/plugins/linear` desde la plantilla, con sus horarios: lunes a viernes a las 9 mira la columna del día del equipo Life y te ayuda a elegir la tarea clave; el sábado a las 10:30, la columna Finde; el viernes a las 18, el cierre de semana. Leer es libre; crear, cambiar o mover una tarea siempre te pregunta. Cambiá horarios y textos en tu copia.
+
+Si preferís una clave personal de API (avanzado), poné en tu copia `auth = { clave = "LINEAR_API_KEY", ayuda = "https://linear.app/settings/account/security" }` y conectalo de nuevo: Wawi te pide la clave en la ventanita segura.
+
+## La API para una pantalla de Ajustes
+
+El menú tiene «Ajustes…» (`Command::OpenSettings`), que todavía no abre nada. La ventana de Ajustes usa `wawi_plugins::control::PluginControl`, que da `PluginHost::control()`. Es `Clone + Send + Sync`, así que vive en el hilo de la interfaz. Nada bloquea: leer copia una foto, y cada acción solo deja un pedido en el canal del anfitrión.
+
+| Llamada | Qué hace |
+| --- | --- |
+| `list() -> Vec<PluginInfo>` | los instalados y los de Wawi, con su estado |
+| `suggested() -> Vec<Suggestion>` | los sugeridos que todavía no están |
+| `add_url(url)` | agrega un conector desde su dirección y lo conecta |
+| `connect(nombre_o_url)` | conecta: navegador, ventanita de clave o reconexión |
+| `disconnect(nombre)` | borra el permiso del llavero y lo cierra |
+| `set_enabled(nombre, bool)` | lo prende (instala uno de Wawi si hace falta) o lo apaga |
+| `remove(nombre)` | lo cierra, borra el permiso y saca su carpeta |
+| `subscribe(f)` | `f(&[PluginInfo])` con la lista entera después de cada cambio |
+
+`PluginInfo` trae `name`, `title`, `description`, `kind` (`Propio` o `Conector`), `installed`, `enabled`, `state` (`Conectado`, `Conectando`, `Desconectado`, `Apagado`, `Error`, con `label()` en castellano), `auth` (`"ninguna"`, `"oauth"` o `"clave"`), `url`, `detail` (por qué no conecta, o cómo conseguir el programa) y `tools`. `Suggestion` trae `name`, `title`, `url`, `description`, `icon` y `template`.
+
+`subscribe` corre en el hilo del anfitrión: pasale la lista a la cola de la interfaz y volvé enseguida. La ventanita de la clave ya existe: el anfitrión la pide con un `KeyPrompt` y el cuerpo la muestra (`Update::AskSecret`).
 
 ## Otros ejemplos: carácter y curiosidad
 

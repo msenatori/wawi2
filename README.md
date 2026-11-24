@@ -1,8 +1,76 @@
 # Wawi 2
 
+[![CI](https://github.com/msenatori/wawi2/actions/workflows/ci.yml/badge.svg)](https://github.com/msenatori/wawi2/actions/workflows/ci.yml)
+
 Wawi es un asistente de voz. Esta es la reescritura desde cero en Rust: primero para Mac, y en Rust para que después puedan venir otros sistemas.
 
 Esta primera parte es el núcleo del diálogo, un banco de pruebas, el cerebro real, un reconocedor de voz local, la voz de Wawi (TTS local) y la capa de audio en vivo para Mac (micrófono con la tecla y reproducción, con cancelación de eco). Con `--voice` todo eso está enchufado: mantenés la ⌘ derecha, hablás y Wawi te contesta en voz alta (ver «Cómo hablar con Wawi 2»).
+
+## Instalación
+
+### Qué necesitás
+
+- Una Mac con Apple Silicon (M1 o más nueva). Se probó en macOS 26; pide macOS 13 o más nuevo.
+- [Rust](https://rustup.rs) para compilarla (`curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`).
+- [Claude Code](https://claude.com/claude-code), el programa `claude`, con tu cuenta de Claude (Pro o Max). Wawi lo usa como cerebro, con tu suscripción. No hace falta clave de API.
+- Unos 2 GB libres: 1 GB para los modelos de voz y el resto para compilar.
+
+### 1. Bajá el código y armá la app
+
+```sh
+git clone https://github.com/msenatori/wawi2.git
+cd wawi2
+scripts/bundle-mac.sh
+```
+
+Compila y deja `dist/Wawi.app`. Movela a Aplicaciones si querés (`WAWI_APP_OUT=/Applications scripts/bundle-mac.sh` la arma directamente ahí).
+
+Si preferís no armar la app, también anda desde la terminal: `cargo run --release -p wawi-app -- --voice`.
+
+### 2. Prepará todo con `setup`
+
+```sh
+dist/Wawi.app/Contents/MacOS/wawi2 setup
+# o, desde el código:  cargo run --release -p wawi-app -- setup
+```
+
+`setup` hace esto, en orden:
+
+1. Crea la carpeta `~/.wawi2`.
+2. Baja los dos modelos de voz (unos 1000 MB, una sola vez): Parakeet para entender y Kokoro para hablar. Muestra el avance y revisa el tamaño y el SHA-256 de cada archivo, de una versión fija.
+3. Busca `claude` y se fija si iniciaste sesión. Si falta algo, te dice cómo arreglarlo.
+4. Revisa los permisos de macOS. Si falta uno, te abre el panel justo de Ajustes del Sistema y te dice qué app habilitar.
+
+Termina con «Listo. Abrí Wawi y mantené ⌘ derecha para hablarle.». Si algo falta, te dice qué. Lo podés correr las veces que quieras: lo que ya está, solo lo revisa. Con `--sin-abrir` solo informa: no pide permisos ni abre Ajustes.
+
+### 3. Los permisos
+
+macOS da los permisos a la app que abre Wawi:
+
+- Si abrís **Wawi.app**, los permisos son de Wawi. La primera vez te los pide: aceptá el micrófono y habilitá Wawi en Monitoreo de entrada. Si falta uno, Wawi te muestra un aviso, te abre el panel y se cierra. Habilitala y volvé a abrirla.
+- Si la corrés **desde la terminal**, los permisos son de la terminal (Terminal, iTerm, tu editor).
+
+Los permisos son tres, en Ajustes del Sistema > Privacidad y seguridad:
+
+- **Micrófono**: para oírte. Solo escucha mientras mantenés la ⌘ derecha.
+- **Monitoreo de entrada**: para saber cuándo apretás la ⌘ derecha. No lee otras teclas.
+- **Grabación de pantalla**: solo si prendiste el plugin curiosidad (está apagado de entrada).
+
+La app está firmada ad-hoc (sin certificado de Apple). Si macOS te vuelve a pedir los permisos después de recompilar, sacá Wawi de la lista y agregala de nuevo.
+
+### 4. La primera charla
+
+Abrí Wawi.app (doble clic). No aparece en el Dock: aparece la perrita en una esquina y su carita en la barra de menú. Mantené la ⌘ derecha, decile «Hola, ¿qué hora es?» y soltala. Te contesta en voz alta.
+
+Para cerrarla: clic en su carita de la barra de menú > «Salir». Lo que pasó queda en `~/.wawi2/logs` (menú > «Abrir registros»).
+
+### Si no encuentra `claude`
+
+Una app abierta desde el Finder no recibe el PATH de tu terminal. Por eso Wawi busca `claude` y los comandos de los plugins también en `~/.local/bin`, `~/.claude/local`, `~/.cargo/bin`, `~/.bun/bin`, `~/.volta/bin`, `~/.npm-global/bin`, `/opt/homebrew/bin` y `/usr/local/bin`. Si lo tenés en otro lado (por ejemplo con nvm), `setup` anota su carpeta en `~/.wawi2/path`. Ese archivo lo podés editar: una carpeta por línea. `WAWI2_CLAUDE_BIN` elige el programa exacto cuando corrés desde la terminal.
+
+### Lo que falta para distribuirla
+
+Para pasarla a otras personas sin compilar hace falta firmarla con un certificado Developer ID de Apple, con el runtime endurecido, y notarizarla. Eso no está hecho. Tampoco está «Abrir al iniciar sesión» en el menú (se puede hacer con `SMAppService`); por ahora, agregala a mano en Ajustes del Sistema > General > Ítems de inicio.
 
 ## Qué funciona
 
@@ -31,7 +99,7 @@ Esta primera parte es el núcleo del diálogo, un banco de pruebas, el cerebro r
 - En el simulador son de mentira `clima` y `borrar` (las de verdad sí están), la transcripción, y el cerebro también, salvo con `--brain claude`. La hora es la real al arrancar y avanza con el reloj simulado (`/tick`). La transcripción es real solo para los archivos de `/hear`, con `--stt parakeet`. La reproducción es una línea de texto.
 - El esquema JSON de cada herramienta se guarda, pero no se valida: solo se revisa que los argumentos sean un objeto JSON.
 - La iniciativa la disparan los plugins solo en `--voice`; en el simulador se prueba a mano. Las sugerencias descartadas se olvidan al cerrar.
-- Los plugins solo corren en `--voice`, no en el simulador. No hay login OAuth para servidores MCP: un servidor remoto tiene que aceptar una clave en un encabezado.
+- Los plugins solo corren en `--voice`, no en el simulador. Todavía no hay ventana de Ajustes: un plugin se conecta por voz («Wawi, conectá Linear»).
 - El ordenamiento de la memoria con un modelo no existe. Solo está el validador que va a decidir si se acepta lo que proponga.
 - La voz entera (`--voice`) se probó de punta a punta con un WAV y en silencio (`--input-wav`, `--mute`), con el cerebro, Parakeet y Kokoro reales. Con el micrófono y la tecla de verdad todavía no la probó nadie a mano.
 
@@ -41,7 +109,7 @@ Esta primera parte es el núcleo del diálogo, un banco de pruebas, el cerebro r
 cargo run --release -p wawi-app -- --voice
 ```
 
-Al arrancar revisa y va contando, en este orden: los permisos de **Micrófono** y de **Monitoreo de entrada** (los dos para la app desde la que lo corrés, igual que `ptt-test`), que estén los modelos de Parakeet y Kokoro (si falta alguno, te dice los dos comandos para bajarlos y sale: no baja nada solo), carga los dos modelos, abre la memoria y los avisos en `~/.wawi2` (o `$WAWI2_HOME`) y dice qué herramientas tiene y cuántos avisos quedan pendientes, arranca Claude Code para que el primer turno no espere, arranca el audio con cancelación de eco y la tecla. Cuando aparece «Listo: mantené ⌘ derecha y hablá», ya está.
+Al arrancar revisa y va contando, en este orden: los permisos de **Micrófono** y de **Monitoreo de entrada** (los dos para la app desde la que lo corrés, igual que `ptt-test`), que estén los modelos de Parakeet y Kokoro (si falta alguno, te dice que corras `wawi2 setup` y sale: no baja nada solo; esta revisión solo mira tamaños, no recalcula hashes), carga los dos modelos, abre la memoria y los avisos en `~/.wawi2` (o `$WAWI2_HOME`) y dice qué herramientas tiene y cuántos avisos quedan pendientes, arranca Claude Code para que el primer turno no espere, arranca el audio con cancelación de eco y la tecla. Cuando aparece «Listo: mantené ⌘ derecha y hablá», ya está.
 
 Mantené la ⌘ derecha, hablá y soltala. En la terminal ves cada turno así:
 
@@ -51,12 +119,12 @@ wawi: «Son las 16:23.»
   tiempos: transcripción 125 ms · primera frase 125 ms · primer audio 545 ms · total sentido 545 ms
 ```
 
-Los tiempos se cuentan desde que soltás la tecla: hasta tener el texto, hasta la primera frase de Wawi y hasta que empieza a sonar. «Total sentido» es ese último, el silencio que esperás vos. Si apretás la tecla mientras habla, la corta en el acto y cancela lo que estaba pensando. Enter o Ctrl+C cierran todo: el audio, Claude Code y los modelos (un segundo Ctrl+C sale sin esperar).
+Los tiempos se cuentan desde que soltás la tecla: hasta tener el texto, hasta la primera frase de Wawi y hasta que empieza a sonar. «Total sentido» es ese último, el silencio que esperás vos. Si apretás la tecla mientras habla, la corta en el acto y cancela lo que estaba pensando. Enter o Ctrl+C cierran todo: el audio, Claude Code y los modelos (un segundo Ctrl+C sale sin esperar). En Wawi.app se cierra con «Salir» en el menú.
 
 - **Cerebro:** `claude-sonnet-5-5` con esfuerzo `low`, lo más rápido que sigue sonando bien: empieza a hablar en alrededor de 1 s en vez de 4 s con Opus. La medición y los ejemplos están en `docs/LATENCIA.md`. `WAWI2_CLAUDE_MODEL` y `WAWI2_CLAUDE_EFFORT` lo cambian (por ejemplo `WAWI2_CLAUDE_MODEL=claude-opus-5-5`). Al arrancar dice cuál usa.
 - **Voz:** la de Wawi 1 (`jf_alpha`, velocidad 1,05, tres semitonos arriba) con acento castellano. Cada frase termina con 0,3 s de silencio, para que los auriculares Bluetooth no se coman el final.
 - **Idioma:** si lo que oyó Parakeet probablemente no es castellano, no se lo pasa al cerebro: Wawi dice «No te entendí, ¿me lo repetís?» y el turno queda en el registro como «no entendido».
-- **Registros:** `~/.wawi2/logs/turns.log` guarda una línea por turno con fecha, los tiempos, lo que oyó y lo que dijo (si algo parece una clave, no se guarda). `~/.wawi2/logs/session.log` es para depurar: qué pasó y cuándo, sin textos ni audio.
+- **Registros:** `~/.wawi2/logs/turns.log` guarda una línea por turno con fecha, los tiempos, lo que oyó y lo que dijo (si algo parece una clave, no se guarda). `~/.wawi2/logs/session.log` es para depurar: qué pasó y cuándo, sin textos ni audio. Abierta como Wawi.app, lo que en la terminal se ve en pantalla va a `~/.wawi2/logs/wawi-app.log` (el de la vez anterior queda en `wawi-app.log.1`).
 - **Salidas:** 0 bien, 1 error, 2 argumentos mal, 3 sin permiso de micrófono, 4 faltan modelos, 5 sin permiso de teclado.
 
 Para probarlo sin micrófono y sin que suene nada:
@@ -95,7 +163,7 @@ cargo run --release -p wawi-app -- --voice --no-ui        # sin cuerpo, solo la 
 - **Su cuerpo.** Wawi siente la gravedad, como en Wawi 1: si la soltás en el aire, cae al piso (arriba del Dock) o arriba de una ventana; si la ventana donde está sentada se mueve o se cierra, se cae. Cada 8 a 25 minutos se levanta y camina a otro lugar; a veces trepa a una ventana o baja en paracaídas. Mientras charlan se queda quieta. «Quedate quieta» en el menú lo apaga. Cómo darle cuerpo a otra mascota: [docs/MASCOTAS.md](docs/MASCOTAS.md).
 - **El menú.** El mismo en la barra de menú (su carita y un signo: ● tranquila, ◉ escuchando, ◍ pensando, ◎ hablando, ◌ sin escuchar) y con clic derecho sobre ella: «Dejar de escuchar» / «Escuchar» (con el micrófono apagado la ⌘ derecha no hace nada), «Ocultar a Wawi» / «Mostrar a Wawi» (con el nombre de la mascota activa), «Quedate quieta» / «Podés moverte» (la gravedad y los paseos), «Mascota» (las mascotas instaladas), «Abrir registros» (abre `~/.wawi2/logs` en el Finder) y «Salir», que cierra igual que Enter o Ctrl+C: corta el audio y cierra Claude Code.
 - **Consumo.** Solo se redibuja cuando algo cambia: tranquila o dormida usa alrededor de 1 % de un núcleo (M4 Pro, medido con `--ui-demo`); hablando o pensando, unos 3 %.
-- **Los dibujos.** Son los de Wawi 1, copiados de `jarvis/wawi/assets` a `assets/mascotas/wawi` (los cuadros en `cuadros/`, descritos por `mascota.toml`). Wawi la dibujó la sobrina del dueño; los dibujos tienen su propia licencia, CC BY-NC 4.0 (`assets/mascotas/wawi/LICENSE-art.md`), no la del código. Sin los dibujos el programa anda igual, solo con el ícono de la barra de menú. `$WAWI2_ASSETS` apunta a otra carpeta con `mascotas/` adentro.
+- **Los dibujos.** Son los de Wawi 1, copiados de `jarvis/wawi/assets` a `assets/mascotas/wawi` (los cuadros en `cuadros/`, descritos por `mascota.toml`). Wawi la dibujó la sobrina del dueño; los dibujos tienen su propia licencia, CC BY-NC 4.0 (`assets/mascotas/wawi/LICENSE-art.md`), no la del código. Sin los dibujos el programa anda igual, solo con el ícono de la barra de menú. `$WAWI2_ASSETS` apunta a otra carpeta con `mascotas/` adentro. En Wawi.app los dibujos van en `Contents/Resources/mascotas`.
 - **Otras mascotas.** Los dibujos y las animaciones no están en el código: una mascota es una carpeta con PNG y un `mascota.toml`. Wawi es la que viene incluida; las tuyas van en `~/.wawi2/mascotas/<id>/` y se eligen en el menú, en «Mascota», sin reiniciar. `mascota nueva kitty --nombre Kitty` crea una con dibujos de ejemplo, `mascota validar CARPETA` la revisa y `mascota ver CARPETA` la muestra (también `wawi2 --ui-demo --mascota CARPETA`). Una mascota rota no rompe nada: Wawi avisa y vuelve a Wawi. Cómo hacer una, paso a paso: [docs/MASCOTAS.md](docs/MASCOTAS.md).
 - **Sin frenar la voz.** Los dibujos se decodifican de a poco, en un hilo aparte: antes del primer cuadro solo `idle`, y nunca en el hilo de la voz. Hay un tope de memoria para los dibujos decodificados.
 
@@ -172,14 +240,26 @@ Un plugin es un servidor MCP (local por stdio o remoto por HTTP) y una carpeta `
 
 - Sus herramientas le llegan al cerebro como `<plugin>__<herramienta>`, por el servidor `wawi`. `--allowedTools mcp__wawi` sigue siendo el único permiso.
 - Cada herramienta es `read` o `act`. La iniciativa solo lee. Una `act` pregunta antes («¿Confirmás? Decime sí o no.»).
-- Las claves van en `~/.wawi2/secrets.toml` (permisos 600), nunca en `plugin.toml`.
+- Las claves y los permisos van al llavero de macOS, nunca a un archivo. `~/.wawi2/secrets.toml` sigue andando para lo viejo.
 - Cada llamada queda en `~/.wawi2/logs/plugins.log`, sin argumentos, resultados ni secretos.
 
-El primer plugin de verdad es Linear, en `plugins/linear/`. Para activarlo: copialo a `~/.wawi2/plugins/linear`, poné `LINEAR_API_KEY = "lin_api_..."` en `~/.wawi2/secrets.toml` y hacé `chmod 600 ~/.wawi2/secrets.toml`.
+Hay dos clases de plugins:
 
-El segundo es el instinto, en `plugins/instinto/`: `cargo install --path crates/wawi-instinto --locked` y copiá la carpeta a `~/.wawi2/plugins/instinto`. Ver `docs/INSTINTO.md`.
+- **Los de Wawi**: instinto, carácter, curiosidad y autoarreglo. Vienen con Wawi y arrancan apagados. Para prender uno, decile «Wawi, conectá el instinto». Wawi lo instala sola. Su programa (`wawi-instinto`, por ejemplo) tiene que estar junto a `wawi2` o en el PATH: si falta, Wawi te dice cómo compilarlo.
+- **Los conectores**: servidores MCP remotos, como Linear. Ninguno viene instalado. Wawi trae una lista corta de sugeridos (`assets/catalogo/sugeridos.toml`) y también acepta cualquier dirección.
 
-El carácter y la curiosidad, en `plugins/caracter/` y `plugins/curiosidad/`, se instalan igual (`cargo install --path crates/wawi-caracter --locked`, `cargo install --path crates/wawi-curiosidad --locked`). Ver `docs/PERSONALIDAD.md`.
+### Conectar Linear
+
+1. Decile a Wawi: «Wawi, conectá Linear».
+2. Wawi te abre Linear en el navegador. Entrá con tu cuenta y tocá «Permitir».
+3. El navegador dice «Listo, ya podés volver a Wawi». Volvé.
+4. Listo. Wawi avisa que quedó conectado y ya usa tus tareas.
+
+No hay que copiar carpetas, ni escribir claves, ni hacer `chmod`. El permiso queda en el llavero de macOS y Wawi lo renueva sola. Si algún día Linear lo revoca, Wawi lo marca «desconectado»: decile «conectá Linear» otra vez.
+
+Para otro servidor, decí su dirección: «conectá https://ejemplo.com/mcp». Wawi averigua si usa login (OAuth) o una clave. Si usa una clave, te abre una ventanita segura para pegarla. Nunca la digas en voz alta.
+
+Para saber qué tenés, preguntá «¿qué plugins tenés?». La guía completa, con el campo `auth` y la API para una pantalla de Ajustes, está en `docs/PLUGINS.md`.
 
 ## Con el cerebro real
 

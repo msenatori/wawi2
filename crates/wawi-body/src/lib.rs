@@ -76,8 +76,38 @@ pub enum Update {
     Drop(f64),
     /// Go for a walk now (previews; a pet with a body).
     Wander,
+    /// Ask the owner for a secret (a plugin's API key) in a native dialog
+    /// with a hidden field. The answer goes to [`SecretAsk::reply`] only:
+    /// the body never logs, shows or keeps it.
+    AskSecret(SecretAsk),
     /// The program is done: close the windows and return from [`run`].
     Close,
+}
+
+/// Where a [`SecretAsk`]'s answer goes: `Some(text)` or `None` (cancelled).
+#[derive(Clone)]
+pub struct SecretReply(pub Arc<dyn Fn(Option<String>) + Send + Sync>);
+
+impl fmt::Debug for SecretReply {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("SecretReply")
+    }
+}
+
+impl PartialEq for SecretReply {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+/// A secure input dialog: a title («Clave de Linear»), a sentence, an
+/// optional «Dónde la consigo» link, and where the answer goes.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SecretAsk {
+    pub title: String,
+    pub message: String,
+    pub help_url: Option<String>,
+    pub reply: SecretReply,
 }
 
 /// What the owner asked for from the menu, for the program to carry out.
@@ -87,6 +117,8 @@ pub enum Command {
     SetListening(bool),
     /// End the program, the same way as Enter or Ctrl+C.
     Quit,
+    /// «Ajustes…»: open the settings window (a hook; nothing yet).
+    OpenSettings,
 }
 
 /// The program's end of the body: a channel plus a way to wake the UI thread.
@@ -171,11 +203,20 @@ impl BodyConfig {
     }
 }
 
-/// The built-in packs next to the source tree (`cargo run`), or
-/// `$WAWI2_ASSETS/mascotas`.
+/// The built-in packs: `$WAWI2_ASSETS/mascotas`, else Wawi.app's
+/// `Contents/Resources/mascotas`, else next to the source tree (`cargo run`).
 pub fn default_assets() -> PathBuf {
     if let Some(dir) = std::env::var_os("WAWI2_ASSETS") {
         return PathBuf::from(dir).join("mascotas");
+    }
+    // In the app: `Wawi.app/Contents/MacOS/wawi2` next to `../Resources`.
+    let bundled = std::env::current_exe().ok().and_then(|exe| {
+        exe.parent()
+            .filter(|dir| dir.ends_with("Contents/MacOS"))
+            .map(|dir| dir.join("../Resources/mascotas"))
+    });
+    if let Some(dir) = bundled.filter(|dir| dir.is_dir()) {
+        return dir.canonicalize().unwrap_or(dir);
     }
     let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/mascotas");
     if source.is_dir() {

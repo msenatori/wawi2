@@ -65,6 +65,35 @@ pub enum Server {
     },
 }
 
+/// How Wawi gets the server's permission (`auth` in plugin.toml).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum Auth {
+    /// Nothing, or whatever `${SECRET}` references in the manifest say.
+    #[default]
+    None,
+    /// OAuth 2.1 (MCP authorization): «Conectar» opens the browser. Only for
+    /// `url` servers. `client_id` for servers without dynamic registration.
+    OAuth {
+        client_id: Option<String>,
+        scopes: Option<Vec<String>>,
+    },
+    /// An API key the owner pastes once in a secure dialog. It is kept in
+    /// the Keychain under the account `name`, and `${name}` in the manifest
+    /// resolves to it. A `url` server with no header that uses it sends it
+    /// as `Authorization: Bearer`.
+    Key { name: String, help: Option<String> },
+}
+
+impl Auth {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Auth::None => "ninguna",
+            Auth::OAuth { .. } => "oauth",
+            Auth::Key { .. } => "clave",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Watch {
     pub name: String,
@@ -98,6 +127,7 @@ pub struct Manifest {
     /// Gets every finished turn through `observar_charla`. Off by default.
     pub observe_chat: bool,
     pub server: Server,
+    pub auth: Auth,
     pub tools: BTreeMap<String, ToolRule>,
     pub watches: Vec<Watch>,
     pub routines: Vec<Routine>,
@@ -155,6 +185,7 @@ struct Raw {
     #[serde(default)]
     observa_charla: bool,
     server: RawServer,
+    auth: Option<toml::Value>,
     #[serde(default)]
     tools: BTreeMap<String, ToolRule>,
     #[serde(default)]
@@ -234,6 +265,10 @@ pub fn parse(text: &str, dir: &Path) -> Result<Manifest, String> {
         }
         _ => return Err("[server] necesita command (stdio) o url (http), uno solo".into()),
     };
+    let auth = parse_auth(raw.auth.as_ref())?;
+    if matches!(auth, Auth::OAuth { .. }) && !matches!(server, Server::Http { .. }) {
+        return Err("auth = \"oauth\" es solo para servidores con url".into());
+    }
     let timeout = match raw.timeout {
         Some(text) => parse_duration(&text)?,
         None => DEFAULT_TIMEOUT,
@@ -318,10 +353,82 @@ pub fn parse(text: &str, dir: &Path) -> Result<Manifest, String> {
         expose: raw.expose,
         observe_chat: raw.observa_charla,
         server,
+        auth,
         tools: raw.tools,
         watches,
         routines,
     })
+}
+
+/// `auth = "oauth"`, `auth = "ninguna"`, `auth = { oauth = true,
+/// client_id = "...", scopes = [...] }` or `auth = { clave = "NOMBRE",
+/// ayuda = "https://..." }`.
+fn parse_auth(value: Option<&toml::Value>) -> Result<Auth, String> {
+    use toml::Value as T;
+    let bad = || {
+        "auth tiene que ser \"oauth\", \"ninguna\" o una tabla con clave (y ayuda) u oauth = true"
+            .to_owned()
+    };
+    match value {
+        None => Ok(Auth::None),
+        Some(T::String(text)) => match text.as_str() {
+            "oauth" => Ok(Auth::OAuth {
+                client_id: None,
+                scopes: None,
+            }),
+            "ninguna" | "none" => Ok(Auth::None),
+            _ => Err(bad()),
+        },
+        Some(T::Table(table)) => {
+            for key in table.keys() {
+                if !["clave", "ayuda", "oauth", "client_id", "scopes"].contains(&key.as_str()) {
+                    return Err(format!("auth: no conozco «{key}»"));
+                }
+            }
+            let text = |key: &str| table.get(key).and_then(T::as_str).map(str::to_owned);
+            if let Some(name) = text("clave") {
+                if table.contains_key("oauth") {
+                    return Err("auth: clave u oauth, uno solo".into());
+                }
+                let valid = !name.is_empty()
+                    && name
+                        .chars()
+                        .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_');
+                if !valid {
+                    return Err(format!(
+                        "auth: la clave «{name}» va en MAYÚSCULAS, números y _"
+                    ));
+                }
+                if let Some(help) = text("ayuda")
+                    && !help.starts_with("https://")
+                {
+                    return Err("auth: ayuda tiene que ser una dirección https://".into());
+                }
+                return Ok(Auth::Key {
+                    name,
+                    help: text("ayuda"),
+                });
+            }
+            if table.get("oauth").and_then(T::as_bool) == Some(true) {
+                let scopes = match table.get("scopes") {
+                    None => None,
+                    Some(T::Array(items)) => Some(
+                        items
+                            .iter()
+                            .map(|i| i.as_str().map(str::to_owned).ok_or_else(bad))
+                            .collect::<Result<Vec<_>, _>>()?,
+                    ),
+                    Some(_) => return Err(bad()),
+                };
+                return Ok(Auth::OAuth {
+                    client_id: text("client_id"),
+                    scopes,
+                });
+            }
+            Err(bad())
+        }
+        Some(_) => Err(bad()),
+    }
 }
 
 /// Every plugin folder under `<home>/plugins`, sorted by name. Folders whose
@@ -474,12 +581,54 @@ mod tests {
         let m = load(&dir).unwrap();
         assert_eq!(m.name, "linear");
         assert!(matches!(&m.server, Server::Http { url, headers }
-            if url == "https://mcp.linear.app/mcp" && headers["Authorization"] == "Bearer ${LINEAR_API_KEY}"));
+            if url == "https://mcp.linear.app/mcp" && headers.is_empty()));
+        assert!(matches!(m.auth, Auth::OAuth { .. }));
         assert_eq!(m.tools["list_issues"].kind, Some(Kind::Read));
         assert_eq!(m.tools["save_issue"].kind, Some(Kind::Act));
         assert_eq!(m.watches[0].args["state"], "{dia_o_finde}");
         assert_eq!(m.routines[0].name, "cierre");
         assert!(m.instructions.unwrap().contains("Life"));
+    }
+
+    #[test]
+    fn auth_kinds() {
+        let auth = |extra: &str| {
+            parse(&format!("{extra}\n[server]\nurl='https://x/mcp'\n"), &dir()).map(|m| m.auth)
+        };
+        assert_eq!(auth("").unwrap(), Auth::None);
+        assert_eq!(
+            auth("auth = 'oauth'").unwrap(),
+            Auth::OAuth {
+                client_id: None,
+                scopes: None
+            }
+        );
+        assert_eq!(
+            auth("auth = { oauth = true, client_id = 'abc', scopes = ['read'] }").unwrap(),
+            Auth::OAuth {
+                client_id: Some("abc".into()),
+                scopes: Some(vec!["read".into()])
+            }
+        );
+        assert_eq!(
+            auth("auth = { clave = 'LINEAR_API_KEY', ayuda = 'https://linear.app/settings' }")
+                .unwrap(),
+            Auth::Key {
+                name: "LINEAR_API_KEY".into(),
+                help: Some("https://linear.app/settings".into())
+            }
+        );
+        for bad in [
+            "auth = 'magia'",
+            "auth = { clave = 'minusculas' }",
+            "auth = { clave = 'K', ayuda = 'http://x' }",
+            "auth = { otra = 1 }",
+            "auth = 3",
+        ] {
+            assert!(auth(bad).is_err(), "{bad}");
+        }
+        let stdio = parse("auth = 'oauth'\n[server]\ncommand='x'\n", &dir()).unwrap_err();
+        assert!(stdio.contains("url"), "{stdio}");
     }
 
     #[test]

@@ -52,6 +52,8 @@ pub enum Input {
     Segment { samples: Vec<f32>, sample_rate: u32 },
     /// The push-to-talk key went up (for the latency log).
     KeyReleased(Instant),
+    /// A line for the session log only (key presses, ignored keys).
+    Note(&'static str),
     /// From the plugin host's workers.
     Plugin(PluginEvent),
     /// Enter: end the session.
@@ -247,7 +249,14 @@ impl Host {
 
     /// From now on plugin tools register as they connect, and watches,
     /// routines, pushes and the inbox reach the core's instinct gate.
-    pub fn install_plugins(&mut self, plugins: PluginHost) {
+    /// The voice tools `conectar` and `plugins` register now too.
+    pub fn install_plugins(&mut self, mut plugins: PluginHost) {
+        for tool in plugins.base_tools() {
+            self.dialogue.registry_mut().register(tool);
+        }
+        if let Some(body) = &self.body {
+            plugins.set_key_prompter(body.key_prompter());
+        }
         self.plugins = Some(plugins);
     }
 
@@ -316,6 +325,10 @@ impl Host {
 
     /// Reports her look and words to the body from now on.
     pub fn set_body(&mut self, body: Reporter) {
+        // A plugin's key is asked in the body's secure dialog.
+        if let Some(plugins) = &mut self.plugins {
+            plugins.set_key_prompter(body.key_prompter());
+        }
         self.body = Some(body);
     }
 
@@ -362,10 +375,14 @@ impl Host {
                     let found = incidents.detector.plugin_down(plugin, reason, now);
                     incidents.report(found, now);
                 }
-                let tools_changed = matches!(event, PluginEvent::Ready { .. });
-                let events = match &mut self.plugins {
-                    Some(plugins) => plugins.on_event(event, self.dialogue.registry_mut()),
-                    None => Vec::new(),
+                let (events, tools_changed) = match &mut self.plugins {
+                    Some(plugins) => {
+                        let events = plugins.on_event(event, self.dialogue.registry_mut());
+                        // Tools came (a plugin connected) or went (one was
+                        // turned off or disconnected).
+                        (events, plugins.take_tools_changed())
+                    }
+                    None => (Vec::new(), false),
                 };
                 if tools_changed {
                     self.prewarm_brain();
@@ -378,6 +395,7 @@ impl Host {
                 self.logs.session("key up");
                 self.turns.released(at);
             }
+            Input::Note(line) => self.logs.session(line),
             Input::Quit => {}
         }
     }

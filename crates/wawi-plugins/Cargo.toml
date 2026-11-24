@@ -19,6 +19,10 @@ serde_json = "=1.0.149"
 toml = "=1.1.6"
 # Remote MCP over streamable HTTP. Same version the speech crates use.
 ureq = "=3.5.0"
+# OAuth PKCE (S256) and random state/verifier. Both already in the
+# workspace's lockfile (the speech crates use sha2; ring uses getrandom).
+sha2 = "=0.10.9"
+getrandom = "=0.2.17"
 
 [dev-dependencies]
 wawi-brain-claude = { path = "../wawi-brain-claude" }

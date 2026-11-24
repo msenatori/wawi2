@@ -8,6 +8,8 @@
 //! Kokoro (see `voice`).
 
 mod fakes;
+mod launch;
+mod setup;
 mod voice;
 
 use std::cell::RefCell;
@@ -898,14 +900,40 @@ fn load_parakeet() -> Result<Parakeet, String> {
 }
 
 const USAGE: &str = "\
-uso: wawi2 [--brain fake|claude] [--stt fake|parakeet]     el simulador
+uso: wawi2 setup [--sin-abrir]                             la primera vez: modelos, Claude Code y permisos
+     wawi2 [--brain fake|claude] [--stt fake|parakeet]     el simulador
      wawi2 --voice [--mute] [--input-wav ARCHIVO.wav] [--no-ui]
                                                          la voz de verdad (con Wawi en pantalla)
      wawi2 --ui-demo[=idle|listening|transcribing|thinking|speaking|interrupted|error|muted|sleeping]
            [--mascota CARPETA]                           su cuerpo solo, sin audio ni cerebro";
 
 fn main() -> ExitCode {
-    let choice = match choices(std::env::args().skip(1)) {
+    let home = home_dir();
+    // First, before any thread: an app opened from the Finder has no shell
+    // PATH, and `claude` and plugin commands must still be found.
+    launch::extend_path(home.as_deref());
+    let args = launch::real_args(std::env::args().skip(1));
+    if args.first().is_some_and(|arg| arg == "setup") {
+        return match &args[1..] {
+            [] => setup::main(home, true),
+            [flag] if flag == "--sin-abrir" => setup::main(home, false),
+            _ => {
+                eprintln!("setup solo acepta --sin-abrir\n{USAGE}");
+                ExitCode::from(2)
+            }
+        };
+    }
+    if launch::from_bundle() && !io::stdout().is_terminal() {
+        // Wawi.app: nobody reads the output, so it goes to the logs.
+        if let Some(dir) = &home {
+            launch::log_output_to(&dir.join("logs"));
+        }
+        if args.is_empty() {
+            // Opened from the Finder: the voice program, as `--voice`.
+            return voice::main(voice::VoiceOptions::default(), home);
+        }
+    }
+    let choice = match choices(args.into_iter()) {
         Ok(choice) => choice,
         Err(error) => {
             eprintln!("{error}\n{USAGE}");
@@ -913,10 +941,10 @@ fn main() -> ExitCode {
         }
     };
     if let Some(hold) = choice.ui_demo {
-        return voice::ui_demo(hold, home_dir(), choice.mascota.clone());
+        return voice::ui_demo(hold, home, choice.mascota.clone());
     }
     if let Some(options) = choice.voice {
-        return voice::main(options, home_dir());
+        return voice::main(options, home);
     }
     match simulate(&choice) {
         Ok(()) => ExitCode::SUCCESS,

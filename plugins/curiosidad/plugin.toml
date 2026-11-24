@@ -2,9 +2,12 @@
 # algo corto y juguetón. También cuando le preguntás «¿qué te parece esto?».
 # La referencia completa está en docs/PERSONALIDAD.md.
 #
-# Instalarlo:
+# Es un plugin de Wawi: viene con ella, apagado. Para prenderlo, decile
+# «Wawi, conectá la curiosidad». Wawi copia esta carpeta a ~/.wawi2/plugins/curiosidad
+# y lo arranca, sin reiniciar. Necesita su programa, `wawi-curiosidad`:
+#   cargo build --release -p wawi-curiosidad     (queda junto a wawi2)
+# o
 #   cargo install --path crates/wawi-curiosidad --locked
-#   cp -r plugins/curiosidad ~/.wawi2/plugins/curiosidad
 #
 # Hace falta el permiso de Grabación de pantalla para la app desde la que
 # corrés Wawi (por ejemplo, la Terminal). Sin él no mira y lo dice.

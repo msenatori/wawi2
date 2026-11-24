@@ -1,0 +1,33 @@
+# Conectores sugeridos: servidores MCP remotos que Wawi sabe agregar con un
+# clic («Agregar» en Ajustes) o por voz («Wawi, conectá Linear»). Ninguno
+# viene instalado. Agregar uno crea <home>/plugins/<nombre>/plugin.toml.
+#
+# Cada entrada:
+#   nombre       el nombre del plugin: minúsculas, números, - y _
+#   titulo       cómo se muestra y cómo lo nombra Wawi
+#   url          el servidor MCP (https)
+#   descripcion  una frase corta
+#   icono        un nombre de símbolo genérico, para la pantalla de Ajustes
+#   plantilla    opcional: una carpeta de plugins/ en el repo que se usa
+#                como punto de partida (horarios, instrucciones, permisos)
+#
+# Cómo se conecta (OAuth o clave) no se escribe acá: Wawi lo descubre del
+# servidor al agregarlo.
+
+[[sugerido]]
+nombre = "linear"
+titulo = "Linear"
+url = "https://mcp.linear.app/mcp"
+descripcion = "Tus tareas y proyectos en Linear."
+icono = "checklist"
+plantilla = "linear"
+
+# Lugar para más. Ojo: algunos servidores no dejan que una app se registre
+# sola y piden un client_id propio en auth (ver docs/PLUGINS.md).
+#
+# [[sugerido]]
+# nombre = "github"
+# titulo = "GitHub"
+# url = "https://api.githubcopilot.com/mcp/"
+# descripcion = "Tus repositorios, issues y pull requests."
+# icono = "code"

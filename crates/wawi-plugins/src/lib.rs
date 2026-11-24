@@ -18,37 +18,57 @@
 //!   with backoff, every call logged without secrets. A broken plugin never
 //!   takes Wawi down.
 //!
-//! Everything here runs on the host's thread except the workers; results
-//! come back through a [`PluginSink`].
+//! - **Easy to connect.** Wawi's own plugins ship with her ([`catalog`]);
+//!   connectors are remote MCP servers added from a URL. «Conectar» runs
+//!   the MCP OAuth login in the browser ([`oauth`]) or asks for a key in a
+//!   secure dialog, and keeps the credential in the Keychain
+//!   ([`keychain`]). [`control::PluginControl`] is the API for a settings
+//!   screen; the `conectar` and `plugins` tools are the voice side. A
+//!   plugin turned on or connected loads while Wawi runs.
+//!
+//! Everything here runs on the host's thread except the workers and the
+//! short-lived login and probe threads; results come back through a
+//! [`PluginSink`].
 
+pub mod catalog;
+pub mod control;
 pub mod feed;
 pub mod inbox;
+pub mod keychain;
 pub mod log;
 pub mod manifest;
 pub mod mcp;
+pub mod oauth;
 pub mod schedule;
 pub mod secrets;
 pub mod tool;
 mod worker;
 
-use std::collections::VecDeque;
-use std::path::Path;
+use std::collections::{BTreeMap, VecDeque};
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use serde_json::Value;
+use serde_json::{Value, json};
 use wawi_core::{
-    Event, InstinctCandidate, InstinctOutcome, Priority, Registry, SpeechKind, TurnId,
+    Event, InstinctCandidate, InstinctOutcome, Priority, Registry, SpeechKind, Tool, TurnId,
 };
 use wawi_tools::{Civil, WallClock};
 
+use crate::catalog::{BUILTIN, Suggestion};
+use crate::control::{
+    ConnectTool, KeyAnswer, KeyPrompt, KeyPrompter, ListTool, PluginControl, PluginInfo,
+    PluginKind, PluginState, Reply, Request, Shared, answer,
+};
 use crate::feed::{FeedItem, TurnFeed};
 use crate::inbox::Inbox;
+use crate::keychain::{OAUTH_ACCOUNT, OAUTH_CLIENT_ACCOUNT, SecretStore, Vault};
 use crate::log::CallLog;
-use crate::manifest::{Manifest, truncate};
+use crate::manifest::{Auth, Manifest, Server, truncate};
+use crate::oauth::Grant;
 use crate::schedule::{Entry, Scheduler, When, expand, minute_of_day};
 use crate::secrets::Secrets;
 use crate::tool::{PluginTool, PluginToolSpec};
@@ -92,6 +112,54 @@ pub enum PluginEvent {
     },
     /// The plugin pushed an instinct.
     Push { plugin: String, params: Value },
+    /// Needs the owner: no credential, or the server refused or revoked it.
+    /// It waits (no retries) until it is connected again.
+    NeedsAuth { plugin: String, reason: String },
+    /// An action from a settings screen or the `conectar` tool.
+    Control(Request),
+    /// The browser login ended; on success the grant is in the Keychain.
+    LoginDone {
+        plugin: String,
+        result: Result<(), String>,
+    },
+    /// A connector from a URL was probed and written (or not).
+    Added {
+        plugin: String,
+        reply: Option<Reply>,
+        result: Result<(), String>,
+    },
+    /// The key dialog ended: `Ok(true)` saved, `Ok(false)` cancelled.
+    KeySaved {
+        plugin: String,
+        result: Result<bool, String>,
+    },
+}
+
+/// Opens a URL in the owner's browser.
+pub type Opener = Arc<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
+
+/// What the host uses from the outside world, injectable for tests.
+pub struct Services {
+    /// Where credentials live (the Keychain on macOS).
+    pub store: Arc<dyn SecretStore>,
+    pub open: Opener,
+    /// Wawi's own plugins ([`catalog::default_dir`]).
+    pub catalog: Option<PathBuf>,
+    pub suggestions: Vec<Suggestion>,
+    pub login_timeout: Duration,
+}
+
+impl Services {
+    /// The Keychain, the real browser, the bundled catalog and suggestions.
+    pub fn system() -> Self {
+        Self {
+            store: keychain::system(),
+            open: Arc::new(oauth::open_browser),
+            catalog: catalog::default_dir(),
+            suggestions: catalog::suggestions(),
+            login_timeout: oauth::LOGIN_TIMEOUT,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -132,8 +200,24 @@ pub struct PluginHost {
     sink: Arc<dyn PluginSink>,
     log: CallLog,
     options: HostOptions,
+    home: PathBuf,
+    services: Services,
+    secrets: Secrets,
+    /// Every plugin under `<home>/plugins`, on or off.
+    installed: Vec<Manifest>,
+    /// The ones with a worker.
     plugins: Vec<Running>,
-    disabled: Vec<String>,
+    shared: Arc<Shared>,
+    prompter: Option<KeyPrompter>,
+    /// A login, a key dialog or a probe under way, and what it is.
+    pending: BTreeMap<String, String>,
+    /// Waiting for the owner to connect it, and why.
+    waiting: BTreeMap<String, String>,
+    /// The last failure of a running plugin.
+    errors: BTreeMap<String, String>,
+    /// Plugins whose program is missing, and how to get it.
+    missing: BTreeMap<String, String>,
+    tools_changed: bool,
     scheduler: Scheduler,
     problems: Vec<String>,
     feed: TurnFeed,
@@ -146,7 +230,8 @@ impl PluginHost {
     /// Finds the plugins under `<home>/plugins`, starts a worker for each
     /// enabled one (they connect in the background) and opens the inbox.
     /// Problems (a bad plugin.toml, a secrets file with loose permissions)
-    /// are kept for [`Self::problems`]; nothing here fails.
+    /// are kept for [`Self::problems`]; nothing here fails. Credentials
+    /// come from the Keychain.
     pub fn start(
         home: &Path,
         logs_dir: Option<&Path>,
@@ -154,65 +239,23 @@ impl PluginHost {
         sink: Arc<dyn PluginSink>,
         options: HostOptions,
     ) -> Self {
+        Self::start_with(home, logs_dir, clock, sink, options, Services::system())
+    }
+
+    /// [`Self::start`] with its outside world given (tests: a memory store,
+    /// a fake browser).
+    pub fn start_with(
+        home: &Path,
+        logs_dir: Option<&Path>,
+        clock: Rc<dyn WallClock>,
+        sink: Arc<dyn PluginSink>,
+        options: HostOptions,
+        services: Services,
+    ) -> Self {
         let log = CallLog::open(logs_dir);
         let (manifests, mut problems) = manifest::discover(home);
         let (secrets, secrets_problem) = Secrets::load(home);
         problems.extend(secrets_problem);
-        let mut plugins = Vec::new();
-        let mut disabled = Vec::new();
-        let mut entries = Vec::new();
-        for manifest in manifests {
-            if !manifest.enabled {
-                disabled.push(manifest.name.clone());
-                continue;
-            }
-            for watch in &manifest.watches {
-                entries.push(Entry {
-                    key: format!("{}/{}", manifest.name, watch.name),
-                    plugin: manifest.name.clone(),
-                    when: watch.when,
-                });
-            }
-            for routine in &manifest.routines {
-                entries.push(Entry {
-                    key: format!("{}/{}", manifest.name, routine.name),
-                    plugin: manifest.name.clone(),
-                    when: When::At(routine.at),
-                });
-            }
-            let (jobs, rx) = mpsc::channel();
-            let feed: FeedQueue = Arc::new(Mutex::new(VecDeque::new()));
-            let worker = Worker::new(
-                manifest.clone(),
-                secrets.clone(),
-                sink.clone(),
-                log.clone(),
-                jobs.clone(),
-                options.clone(),
-                feed.clone(),
-            );
-            let thread = std::thread::Builder::new()
-                .name(format!("wawi-plugin-{}", manifest.name))
-                .spawn(move || worker.run(rx));
-            match thread {
-                Ok(thread) => plugins.push(Running {
-                    manifest,
-                    jobs,
-                    feed,
-                    ready: false,
-                    settled: false,
-                    registered: Vec::new(),
-                    thread: Some(thread),
-                }),
-                Err(error) => problems.push(format!(
-                    "{}: no pude arrancar su hilo: {error}",
-                    manifest.name
-                )),
-            }
-        }
-        for problem in &problems {
-            log.line(&format!("problema: {problem}"));
-        }
         let inbox = match Inbox::open(home) {
             Ok(inbox) => Some(inbox),
             Err(error) => {
@@ -224,20 +267,123 @@ impl PluginHost {
             }
         };
         let _ = std::fs::create_dir_all(home.join("plugins"));
-        Self {
-            scheduler: Scheduler::new(entries, Some(home.join(SCHEDULE_STATE))),
+        let shared = Arc::new(Shared::new(services.suggestions.clone()));
+        let mut host = Self {
+            scheduler: Scheduler::new(Vec::new(), Some(home.join(SCHEDULE_STATE))),
             clock,
             sink,
             log,
             options,
-            plugins,
-            disabled,
+            home: home.to_path_buf(),
+            services,
+            secrets,
+            installed: Vec::new(),
+            plugins: Vec::new(),
+            shared,
+            prompter: None,
+            pending: BTreeMap::new(),
+            waiting: BTreeMap::new(),
+            errors: BTreeMap::new(),
+            missing: BTreeMap::new(),
+            tools_changed: false,
             problems,
             feed: TurnFeed::default(),
             inbox,
             last_inbox_scan: None,
             next_push: 0,
+        };
+        for manifest in manifests {
+            host.installed.push(manifest.clone());
+            if manifest.enabled {
+                host.start_worker(manifest);
+            }
         }
+        for problem in &host.problems {
+            host.log.line(&format!("problema: {problem}"));
+        }
+        host.publish();
+        host
+    }
+
+    /// Starts a plugin's worker (it connects in the background) and its
+    /// watches and routines. A plugin whose program is missing is marked,
+    /// not started.
+    fn start_worker(&mut self, manifest: Manifest) {
+        let name = manifest.name.clone();
+        if self.plugins.iter().any(|p| p.manifest.name == name) {
+            return;
+        }
+        if let Server::Stdio { command, .. } = &manifest.server
+            && catalog::resolve_command(command, &manifest.dir).is_none()
+        {
+            self.log
+                .line(&format!("{name}: falta el programa {command}"));
+            self.missing.insert(name, catalog::how_to_get(command));
+            return;
+        }
+        self.missing.remove(&name);
+        let mut entries = Vec::new();
+        for watch in &manifest.watches {
+            entries.push(Entry {
+                key: format!("{name}/{}", watch.name),
+                plugin: name.clone(),
+                when: watch.when,
+            });
+        }
+        for routine in &manifest.routines {
+            entries.push(Entry {
+                key: format!("{name}/{}", routine.name),
+                plugin: name.clone(),
+                when: When::At(routine.at),
+            });
+        }
+        let (jobs, rx) = mpsc::channel();
+        let feed: FeedQueue = Arc::new(Mutex::new(VecDeque::new()));
+        let worker = Worker::new(
+            manifest.clone(),
+            self.secrets.clone(),
+            self.sink.clone(),
+            self.log.clone(),
+            jobs.clone(),
+            self.options.clone(),
+            feed.clone(),
+            Vault::new(self.services.store.clone(), &name),
+        );
+        let thread = std::thread::Builder::new()
+            .name(format!("wawi-plugin-{name}"))
+            .spawn(move || worker.run(rx));
+        match thread {
+            Ok(thread) => {
+                self.scheduler.add(entries);
+                self.plugins.push(Running {
+                    manifest,
+                    jobs,
+                    feed,
+                    ready: false,
+                    settled: false,
+                    registered: Vec::new(),
+                    thread: Some(thread),
+                });
+            }
+            Err(error) => self
+                .problems
+                .push(format!("{name}: no pude arrancar su hilo: {error}")),
+        }
+    }
+
+    /// Closes a plugin's worker (without waiting for it) and takes its tools
+    /// out of the registry.
+    fn stop_worker(&mut self, name: &str, registry: &mut Registry) {
+        if let Some(index) = self.plugins.iter().position(|p| p.manifest.name == name) {
+            let mut running = self.plugins.remove(index);
+            for tool in running.registered.drain(..) {
+                registry.remove(&tool);
+                self.tools_changed = true;
+            }
+            let _ = running.jobs.send(Job::Shutdown);
+        }
+        self.scheduler.remove_plugin(name);
+        self.errors.remove(name);
     }
 
     pub fn problems(&self) -> &[String] {
@@ -252,9 +398,41 @@ impl PluginHost {
             .collect()
     }
 
-    /// Plugins with `enabled = false`.
-    pub fn disabled(&self) -> &[String] {
-        &self.disabled
+    /// Installed plugins with `enabled = false`.
+    pub fn disabled(&self) -> Vec<String> {
+        self.installed
+            .iter()
+            .filter(|m| !m.enabled)
+            .map(|m| m.name.clone())
+            .collect()
+    }
+
+    /// The handle for settings screens (see [`control`]).
+    pub fn control(&self) -> PluginControl {
+        PluginControl {
+            sink: self.sink.clone(),
+            shared: self.shared.clone(),
+        }
+    }
+
+    /// The voice tools `conectar` and `plugins`, for the core's registry.
+    pub fn base_tools(&self) -> Vec<Box<dyn Tool>> {
+        vec![
+            Box::new(ConnectTool::new(self.control())),
+            Box::new(ListTool::new(self.control())),
+        ]
+    }
+
+    /// How to show the secure key dialog. Without one, key plugins can only
+    /// use secrets.toml.
+    pub fn set_key_prompter(&mut self, prompter: KeyPrompter) {
+        self.prompter = Some(prompter);
+    }
+
+    /// Whether plugin tools came or went since the last call (the brain
+    /// should get ready for the new list, off the turn path).
+    pub fn take_tools_changed(&mut self) -> bool {
+        std::mem::take(&mut self.tools_changed)
     }
 
     /// Every enabled plugin connected or failed at least once: the tool
@@ -319,14 +497,100 @@ impl PluginHost {
                 }
                 running.ready = true;
                 running.settled = true;
+                self.tools_changed = true;
+                self.waiting.remove(&plugin);
+                self.errors.remove(&plugin);
+                self.publish();
                 Vec::new()
             }
-            PluginEvent::Down { plugin, .. } => {
+            PluginEvent::Down { plugin, reason } => {
                 // Its tools stay registered: a call fails fast with the reason.
                 if let Some(running) = self.plugins.iter_mut().find(|p| p.manifest.name == plugin) {
                     running.ready = false;
                     running.settled = true;
+                    self.errors.insert(plugin, reason);
                 }
+                self.publish();
+                Vec::new()
+            }
+            PluginEvent::NeedsAuth { plugin, reason } => {
+                if let Some(running) = self.plugins.iter_mut().find(|p| p.manifest.name == plugin) {
+                    running.ready = false;
+                    running.settled = true;
+                    self.waiting.insert(plugin, reason);
+                }
+                self.publish();
+                Vec::new()
+            }
+            PluginEvent::Control(request) => {
+                self.request(request, registry);
+                self.publish();
+                Vec::new()
+            }
+            PluginEvent::LoginDone { plugin, result } => {
+                self.pending.remove(&plugin);
+                let events = match result {
+                    Ok(()) => {
+                        self.log.line(&format!("{plugin}: permiso recibido"));
+                        self.waiting.remove(&plugin);
+                        self.restart(&plugin);
+                        let title = self.title(&plugin);
+                        let notice = json!({
+                            "id": "conectado",
+                            "decir": format!("Ya quedó conectado {title}: el dueño le dio permiso en el navegador."),
+                        });
+                        self.push(&plugin, &notice).into_iter().collect()
+                    }
+                    Err(reason) => {
+                        self.log
+                            .line(&format!("{plugin}: el login no terminó: {reason}"));
+                        self.waiting.insert(plugin, reason);
+                        Vec::new()
+                    }
+                };
+                self.publish();
+                events
+            }
+            PluginEvent::Added {
+                plugin,
+                reply,
+                result,
+            } => {
+                self.pending.remove(&plugin);
+                let loaded =
+                    result.and_then(|()| manifest::load(&self.home.join("plugins").join(&plugin)));
+                match loaded {
+                    Ok(manifest) => {
+                        self.log.line(&format!("{plugin}: agregado"));
+                        self.installed.retain(|m| m.name != plugin);
+                        self.installed.push(manifest);
+                        self.connect(&plugin, reply, registry);
+                    }
+                    Err(reason) => answer(
+                        &self.sink,
+                        reply,
+                        Err(format!("No pude agregar ese servidor: {reason}")),
+                    ),
+                }
+                self.publish();
+                Vec::new()
+            }
+            PluginEvent::KeySaved { plugin, result } => {
+                self.pending.remove(&plugin);
+                match result {
+                    Ok(true) => {
+                        self.log.line(&format!("{plugin}: clave guardada"));
+                        self.waiting.remove(&plugin);
+                        self.restart(&plugin);
+                    }
+                    Ok(false) => {
+                        self.waiting.insert(plugin, "no pegaste la clave".into());
+                    }
+                    Err(reason) => {
+                        self.waiting.insert(plugin, reason);
+                    }
+                }
+                self.publish();
                 Vec::new()
             }
             PluginEvent::WatchResult {
@@ -341,6 +605,538 @@ impl PluginHost {
                 self.push(&plugin, &params).into_iter().collect()
             }
         }
+    }
+
+    // -- connecting, from a settings screen or the `conectar` tool ------------
+
+    /// How the owner sees a plugin's name: the suggestion's title, else the
+    /// name with a capital.
+    fn title(&self, name: &str) -> String {
+        if let Some(s) = self.services.suggestions.iter().find(|s| s.name == name) {
+            return s.title.clone();
+        }
+        let mut chars = name.chars();
+        match chars.next() {
+            Some(first) => first.to_uppercase().chain(chars).collect(),
+            None => String::new(),
+        }
+    }
+
+    fn manifest(&self, name: &str) -> Option<&Manifest> {
+        self.installed.iter().find(|m| m.name == name)
+    }
+
+    /// Reads a plugin's folder again after a change on disk.
+    fn reload(&mut self, name: &str) -> Result<Manifest, String> {
+        let manifest = manifest::load(&self.home.join("plugins").join(name))?;
+        self.installed.retain(|m| m.name != name);
+        self.installed.push(manifest.clone());
+        self.installed.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(manifest)
+    }
+
+    /// A new credential: reconnect the worker, or start it.
+    fn restart(&mut self, name: &str) {
+        if let Some(running) = self.plugins.iter_mut().find(|p| p.manifest.name == name) {
+            running.settled = false;
+            let _ = running.jobs.send(Job::Reconnect);
+            return;
+        }
+        if let Some(manifest) = self.manifest(name).filter(|m| m.enabled).cloned() {
+            self.start_worker(manifest);
+        }
+    }
+
+    fn request(&mut self, request: Request, registry: &mut Registry) {
+        match request {
+            Request::Connect { target, reply } => self.connect_target(&target, reply, registry),
+            Request::Disconnect { name, reply } => {
+                let Some(manifest) = self.manifest(&name).cloned() else {
+                    return answer(
+                        &self.sink,
+                        reply,
+                        Err(format!("No tengo un plugin {name}.")),
+                    );
+                };
+                self.stop_worker(&name, registry);
+                self.pending.remove(&name);
+                self.waiting.insert(name.clone(), "lo desconectaste".into());
+                self.forget_credentials(&manifest);
+                self.log.line(&format!("{name}: desconectado por el dueño"));
+                answer(
+                    &self.sink,
+                    reply,
+                    Ok(format!(
+                        "Listo, desconecté {} y borré su permiso.",
+                        self.title(&name)
+                    )),
+                );
+            }
+            Request::SetEnabled {
+                name,
+                enabled,
+                reply,
+            } => {
+                let outcome = self.set_enabled(&name, enabled, registry);
+                answer(&self.sink, reply, outcome);
+            }
+            Request::Remove { name, reply } => {
+                let Some(manifest) = self.manifest(&name).cloned() else {
+                    return answer(
+                        &self.sink,
+                        reply,
+                        Err(format!("No tengo un plugin {name}.")),
+                    );
+                };
+                self.stop_worker(&name, registry);
+                self.forget_credentials(&manifest);
+                let outcome = catalog::remove(&self.home, &name).map(|()| {
+                    self.installed.retain(|m| m.name != name);
+                    for map in [&mut self.pending, &mut self.waiting, &mut self.missing] {
+                        map.remove(&name);
+                    }
+                    self.log.line(&format!("{name}: sacado"));
+                    format!("Listo, saqué {}.", self.title(&name))
+                });
+                answer(&self.sink, reply, outcome);
+            }
+        }
+    }
+
+    /// Deletes the plugin's Keychain items (and tells the server to forget
+    /// the OAuth grant), on a short-lived thread: the Keychain may block.
+    fn forget_credentials(&self, manifest: &Manifest) {
+        let vault = Vault::new(self.services.store.clone(), &manifest.name);
+        let key = match &manifest.auth {
+            Auth::Key { name, .. } => Some(name.clone()),
+            _ => None,
+        };
+        let _ = std::thread::Builder::new()
+            .name("wawi-plugin-forget".into())
+            .spawn(move || {
+                if let Some(grant) = vault
+                    .get(OAUTH_ACCOUNT)
+                    .ok()
+                    .flatten()
+                    .and_then(|text| Grant::from_json(&text))
+                {
+                    oauth::revoke(&grant);
+                }
+                let _ = vault.delete(OAUTH_ACCOUNT);
+                let _ = vault.delete(OAUTH_CLIENT_ACCOUNT);
+                if let Some(key) = key {
+                    let _ = vault.delete(&key);
+                }
+            });
+    }
+
+    fn set_enabled(
+        &mut self,
+        name: &str,
+        enabled: bool,
+        registry: &mut Registry,
+    ) -> Result<String, String> {
+        if self.manifest(name).is_none() {
+            if !enabled {
+                return Err(format!("No tengo un plugin {name}."));
+            }
+            self.install_builtin(name)?;
+        }
+        let dir = self.home.join("plugins").join(name);
+        catalog::set_enabled(&dir, enabled)?;
+        let manifest = self.reload(name)?;
+        let title = self.title(name);
+        if enabled {
+            self.start_worker(manifest);
+            match self.missing.get(name) {
+                Some(how) => Err(format!("Prendí {title}, pero no puede andar: {how}")),
+                None => Ok(format!("Listo, prendí {title}.")),
+            }
+        } else {
+            self.stop_worker(name, registry);
+            self.waiting.remove(name);
+            Ok(format!("Listo, apagué {title}."))
+        }
+    }
+
+    fn install_builtin(&mut self, name: &str) -> Result<(), String> {
+        let catalog = self
+            .services
+            .catalog
+            .clone()
+            .filter(|_| BUILTIN.contains(&name))
+            .ok_or_else(|| format!("No tengo un plugin {name} para instalar."))?;
+        catalog::install(&catalog, &self.home, name)?;
+        self.log
+            .line(&format!("{name}: instalado desde el catálogo"));
+        self.reload(name).map(|_| ())
+    }
+
+    fn connect_target(&mut self, target: &str, reply: Option<Reply>, registry: &mut Registry) {
+        let folded = fold(target);
+        // «conectá el instinto», «la curiosidad»: the article is not the name.
+        let wanted = ["el ", "la ", "los ", "las ", "a "]
+            .iter()
+            .find_map(|article| folded.strip_prefix(article))
+            .map(str::to_owned)
+            .unwrap_or(folded);
+        let is_url = wanted.starts_with("https://") || wanted.starts_with("http://");
+        let same_url = |url: &str| fold(url).trim_end_matches('/') == wanted.trim_end_matches('/');
+        // An installed plugin, by name, title or server URL.
+        let installed = self.installed.iter().find(|m| {
+            fold(&m.name) == wanted
+                || fold(&self.title(&m.name)) == wanted
+                || matches!(&m.server, Server::Http { url, .. } if same_url(url))
+        });
+        if let Some(name) = installed.map(|m| m.name.clone()) {
+            return self.connect(&name, reply, registry);
+        }
+        if !is_url && let Some(name) = BUILTIN.iter().find(|b| fold(b) == wanted) {
+            return match self.set_enabled(name, true, registry) {
+                Ok(_) => self.connect(name, reply, registry),
+                Err(error) => answer(&self.sink, reply, Err(error)),
+            };
+        }
+        let suggestion = self
+            .services
+            .suggestions
+            .iter()
+            .find(|s| fold(&s.name) == wanted || fold(&s.title) == wanted || same_url(&s.url))
+            .cloned();
+        match (suggestion, is_url) {
+            (Some(suggestion), _) => self.add(&suggestion.url.clone(), Some(suggestion), reply),
+            (None, true) => self.add(target.trim(), None, reply),
+            (None, false) => answer(
+                &self.sink,
+                reply,
+                Err(format!(
+                    "No conozco «{target}». Decime la dirección https de su servidor MCP, o preguntame qué plugins hay."
+                )),
+            ),
+        }
+    }
+
+    /// Probes a server and writes its plugin.toml, on a short-lived thread;
+    /// `PluginEvent::Added` comes back and the connection goes on.
+    fn add(&mut self, url: &str, suggestion: Option<Suggestion>, reply: Option<Reply>) {
+        if let Err(error) = oauth::check_secure(url) {
+            return answer(
+                &self.sink,
+                reply,
+                Err(format!("No puedo agregarlo: {error}.")),
+            );
+        }
+        let mut taken: Vec<String> = self.installed.iter().map(|m| m.name.clone()).collect();
+        taken.extend(BUILTIN.iter().map(|b| b.to_string()));
+        taken.extend(self.pending.keys().cloned());
+        let name = match &suggestion {
+            Some(s) if !taken.contains(&s.name) => s.name.clone(),
+            _ => catalog::name_for_url(url, &taken),
+        };
+        self.pending
+            .insert(name.clone(), "revisando el servidor".into());
+        let (home, catalog_dir, sink) = (
+            self.home.clone(),
+            self.services.catalog.clone(),
+            self.sink.clone(),
+        );
+        let url = url.to_owned();
+        let plugin = name.clone();
+        let spawned = std::thread::Builder::new()
+            .name(format!("wawi-plugin-add-{name}"))
+            .spawn(move || {
+                let description = suggestion
+                    .as_ref()
+                    .map(|s| s.description.clone())
+                    .unwrap_or_else(|| format!("Conector de {url}"));
+                let template = suggestion.as_ref().and_then(|s| s.template.clone());
+                let result = catalog::probe(&url, &catalog::key_name(&plugin)).and_then(|auth| {
+                    catalog::write_connector(
+                        &home,
+                        catalog_dir.as_deref(),
+                        &plugin,
+                        &url,
+                        &description,
+                        template.as_deref(),
+                        &auth,
+                    )
+                    .map(|_| ())
+                });
+                sink.plugin(PluginEvent::Added {
+                    plugin,
+                    reply,
+                    result,
+                });
+            });
+        if let Err(error) = spawned {
+            self.pending.remove(&name);
+            self.log
+                .line(&format!("no pude arrancar el hilo de {name}: {error}"));
+        }
+    }
+
+    /// Connects an installed plugin: the browser for OAuth, the dialog for a
+    /// key, a reconnect for the rest.
+    fn connect(&mut self, name: &str, reply: Option<Reply>, registry: &mut Registry) {
+        let Some(mut manifest) = self.manifest(name).cloned() else {
+            return answer(
+                &self.sink,
+                reply,
+                Err(format!("No tengo un plugin {name}.")),
+            );
+        };
+        let title = self.title(name);
+        if !manifest.enabled {
+            match self.set_enabled(name, true, registry) {
+                Ok(_) => {
+                    if let Some(m) = self.manifest(name) {
+                        manifest = m.clone();
+                    }
+                }
+                Err(error) => return answer(&self.sink, reply, Err(error)),
+            }
+        }
+        if let Some(how) = self.missing.get(name) {
+            return answer(&self.sink, reply, Err(how.clone()));
+        }
+        let ready = self
+            .plugins
+            .iter()
+            .any(|p| p.manifest.name == name && p.ready);
+        if ready {
+            return answer(&self.sink, reply, Ok(format!("{title} ya está conectado.")));
+        }
+        if let Some(what) = self.pending.get(name) {
+            return answer(
+                &self.sink,
+                reply,
+                Ok(format!("Ya estoy en eso con {title}: {what}.")),
+            );
+        }
+        match manifest.auth.clone() {
+            Auth::OAuth { client_id, scopes } => {
+                let Server::Http { url, .. } = &manifest.server else {
+                    return answer(
+                        &self.sink,
+                        reply,
+                        Err("OAuth es solo para servidores con url".into()),
+                    );
+                };
+                self.pending.insert(
+                    name.to_owned(),
+                    "esperando el permiso en el navegador".into(),
+                );
+                self.login(name, url.clone(), client_id, scopes, title, reply);
+            }
+            Auth::Key { name: key, help } => {
+                let Some(prompter) = &self.prompter else {
+                    return answer(
+                        &self.sink,
+                        reply,
+                        Err(
+                            "Para pedirte la clave necesito la ventana de Wawi (sin --no-ui)."
+                                .into(),
+                        ),
+                    );
+                };
+                self.pending
+                    .insert(name.to_owned(), "esperando la clave".into());
+                let vault = Vault::new(self.services.store.clone(), name);
+                let sink = self.sink.clone();
+                let plugin = name.to_owned();
+                let answer_key = KeyAnswer::new(move |given: Option<String>| {
+                    let given = given.map(|k| k.trim().to_owned()).filter(|k| !k.is_empty());
+                    let Some(given) = given else {
+                        return sink.plugin(PluginEvent::KeySaved {
+                            plugin: plugin.clone(),
+                            result: Ok(false),
+                        });
+                    };
+                    // The Keychain may block: not on the UI thread.
+                    let (vault, sink, plugin, key) =
+                        (vault.clone(), sink.clone(), plugin.clone(), key.clone());
+                    let _ = std::thread::Builder::new()
+                        .name("wawi-plugin-key".into())
+                        .spawn(move || {
+                            let result = vault.set(&key, &given).map(|()| true);
+                            sink.plugin(PluginEvent::KeySaved { plugin, result });
+                        });
+                });
+                prompter(KeyPrompt {
+                    plugin: name.to_owned(),
+                    title: format!("Clave de {title}"),
+                    message: format!(
+                        "Pegá tu clave de {title}. Queda guardada en el llavero de tu Mac; Wawi no la muestra ni la dice."
+                    ),
+                    help,
+                    answer: answer_key,
+                });
+                answer(
+                    &self.sink,
+                    reply,
+                    Ok(format!(
+                        "Te abrí una ventanita para que pegues la clave de {title}. No me la digas en voz alta."
+                    )),
+                );
+            }
+            Auth::None => {
+                self.waiting.remove(name);
+                self.restart(name);
+                answer(
+                    &self.sink,
+                    reply,
+                    Ok(format!(
+                        "Listo, estoy conectando {title}; en unos segundos tengo sus herramientas."
+                    )),
+                );
+            }
+        }
+    }
+
+    /// The browser login, on its own thread. `reply` is answered as soon as
+    /// the browser opens (or the login fails before that).
+    fn login(
+        &self,
+        name: &str,
+        url: String,
+        client_id: Option<String>,
+        scopes: Option<Vec<String>>,
+        title: String,
+        reply: Option<Reply>,
+    ) {
+        let vault = Vault::new(self.services.store.clone(), name);
+        let (sink, open, timeout) = (
+            self.sink.clone(),
+            self.services.open.clone(),
+            self.services.login_timeout,
+        );
+        let plugin = name.to_owned();
+        self.log.line(&format!("{plugin}: login en el navegador"));
+        let spawned = std::thread::Builder::new()
+            .name(format!("wawi-plugin-login-{name}"))
+            .spawn(move || {
+                let previous = [OAUTH_ACCOUNT, OAUTH_CLIENT_ACCOUNT]
+                    .iter()
+                    .find_map(|account| vault.get(account).ok().flatten())
+                    .and_then(|text| Grant::from_json(&text));
+                let mut reply = reply;
+                let result = {
+                    let mut opened = || {
+                        answer(
+                            &sink,
+                            reply.take(),
+                            Ok(format!(
+                                "Te abrí {title} en el navegador para que me des permiso."
+                            )),
+                        );
+                    };
+                    oauth::login(oauth::Login {
+                        mcp_url: &url,
+                        client_id: client_id.as_deref(),
+                        scopes: scopes.as_deref(),
+                        previous: previous.as_ref(),
+                        www_authenticate: None,
+                        timeout,
+                        open: &*open,
+                        opened: &mut opened,
+                    })
+                };
+                let result = result.and_then(|grant| {
+                    vault.set(OAUTH_ACCOUNT, &grant.to_json())?;
+                    // The client alone, to reuse it after a revocation.
+                    let client = Grant {
+                        access_token: String::new(),
+                        refresh_token: None,
+                        expires_at: None,
+                        scope: None,
+                        ..grant
+                    };
+                    vault.set(OAUTH_CLIENT_ACCOUNT, &client.to_json())
+                });
+                if let Err(error) = &result {
+                    answer(
+                        &sink,
+                        reply.take(),
+                        Err(format!("No pude conectar {title}: {error}")),
+                    );
+                }
+                sink.plugin(PluginEvent::LoginDone { plugin, result });
+            });
+        if let Err(error) = spawned {
+            self.log
+                .line(&format!("no pude arrancar el login de {name}: {error}"));
+        }
+    }
+
+    // -- the snapshot for screens ------------------------------------------------
+
+    fn info(&self, name: &str) -> PluginInfo {
+        let manifest = self.manifest(name);
+        let kind = if BUILTIN.contains(&name) {
+            PluginKind::Propio
+        } else {
+            PluginKind::Conector
+        };
+        let installed = manifest.is_some();
+        let enabled = manifest.is_some_and(|m| m.enabled);
+        let running = self.plugins.iter().find(|p| p.manifest.name == name);
+        let reason = |map: &BTreeMap<String, String>| map.get(name).cloned();
+        let (state, detail) = if !enabled {
+            let detail = match (installed, kind) {
+                (false, _) => Some("de Wawi; prendelo para usarlo".to_owned()),
+                _ => None,
+            };
+            (PluginState::Apagado, detail)
+        } else if let Some(what) = reason(&self.pending) {
+            (PluginState::Conectando, Some(what))
+        } else if let Some(how) = reason(&self.missing) {
+            (PluginState::Error, Some(how))
+        } else {
+            match running {
+                Some(r) if r.ready => (PluginState::Conectado, None),
+                _ if self.waiting.contains_key(name) => {
+                    (PluginState::Desconectado, reason(&self.waiting))
+                }
+                Some(r) if r.settled => (PluginState::Error, reason(&self.errors)),
+                Some(_) => (PluginState::Conectando, None),
+                None => (PluginState::Desconectado, None),
+            }
+        };
+        PluginInfo {
+            name: name.to_owned(),
+            title: self.title(name),
+            description: manifest.map(|m| m.description.clone()).unwrap_or_default(),
+            kind,
+            installed,
+            enabled,
+            state,
+            auth: manifest.map(|m| m.auth.label()).unwrap_or("ninguna"),
+            url: manifest.and_then(|m| match &m.server {
+                Server::Http { url, .. } => Some(url.clone()),
+                Server::Stdio { .. } => None,
+            }),
+            detail,
+            tools: running
+                .filter(|r| r.ready)
+                .map(|r| r.registered.len())
+                .unwrap_or(0),
+        }
+    }
+
+    /// Recomputes the list for screens and tells the subscribers.
+    fn publish(&self) {
+        let mut names: Vec<String> = self.installed.iter().map(|m| m.name.clone()).collect();
+        if let Some(catalog) = &self.services.catalog {
+            for builtin in BUILTIN {
+                let shipped = catalog.join(builtin).join("plugin.toml").is_file();
+                if shipped && !names.iter().any(|n| n == builtin) {
+                    names.push(builtin.to_string());
+                }
+            }
+        }
+        names.sort();
+        let infos: Vec<PluginInfo> = names.iter().map(|name| self.info(name)).collect();
+        self.shared.publish(infos);
     }
 
     fn watch_result(
@@ -640,6 +1436,22 @@ impl PluginHost {
             }
         }
     }
+}
+
+/// Lowercase without accents, for matching what the owner said.
+fn fold(text: &str) -> String {
+    text.trim()
+        .to_lowercase()
+        .chars()
+        .map(|c| match c {
+            'á' => 'a',
+            'é' => 'e',
+            'í' => 'i',
+            'ó' => 'o',
+            'ú' | 'ü' => 'u',
+            other => other,
+        })
+        .collect()
 }
 
 impl Drop for PluginHost {

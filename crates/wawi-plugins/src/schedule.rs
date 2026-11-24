@@ -235,6 +235,18 @@ impl Scheduler {
         &self.entries
     }
 
+    /// A plugin turned on while Wawi runs.
+    pub fn add(&mut self, entries: Vec<Entry>) {
+        self.entries.extend(entries);
+    }
+
+    /// A plugin turned off: its entries go (what ran today is remembered).
+    pub fn remove_plugin(&mut self, plugin: &str) {
+        self.entries.retain(|e| e.plugin != plugin);
+        let prefix = format!("{plugin}/");
+        self.next_every.retain(|key, _| !key.starts_with(&prefix));
+    }
+
     /// The keys due now. `ready` says whether a plugin can take calls; an
     /// entry of a plugin that is not ready stays due. `every` entries run
     /// first as soon as their plugin is ready.

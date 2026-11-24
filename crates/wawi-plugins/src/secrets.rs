@@ -67,6 +67,26 @@ impl Secrets {
         }
     }
 
+    /// A copy where `${name}` gives `value` (from the Keychain), ahead of
+    /// secrets.toml and the environment. The log blanking stays shared.
+    pub fn with_value(&self, name: &str, value: &str) -> Self {
+        let mut values = self.values.clone();
+        values.insert(name.to_owned(), value.to_owned());
+        Self {
+            values,
+            used: self.used.clone(),
+        }
+    }
+
+    /// Blanks `value` out of logs from now on (an OAuth token, say).
+    pub fn remember(&self, value: &str) {
+        if let Ok(mut used) = self.used.lock()
+            && !used.iter().any(|v| v == value)
+        {
+            used.push(value.to_owned());
+        }
+    }
+
     /// Replaces every `${NAME}` in `template`. A missing name is an error
     /// that names it, never a value.
     pub fn resolve(&self, template: &str) -> Result<String, String> {

@@ -1,7 +1,7 @@
 //! Startup and shutdown of the voice program on macOS: permissions, models,
 //! memory, brain, live audio and the right-Command key, then the host loop.
 
-use std::io::{self, BufRead};
+use std::io::{self, BufRead, IsTerminal};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::rc::Rc;
@@ -34,6 +34,7 @@ use super::clock::SystemClock;
 use super::host::{self, Ended, Host, Input, InputSink, Logs, Parts, Speaker, Until};
 use super::mute::NullPlayer;
 use super::{VoiceOptions, exit};
+use crate::launch::{self, Pane};
 
 /// How long startup waits for plugins before starting the brain.
 const PLUGIN_WAIT: Duration = Duration::from_millis(1500);
@@ -124,7 +125,7 @@ fn run(
         match ensure_microphone() {
             Ok(()) => println!("  micrófono: permitido"),
             Err(message) => {
-                eprintln!("{message}");
+                tell(&message, Some(Pane::Microphone));
                 return ExitCode::from(exit::NO_MIC);
             }
         }
@@ -133,7 +134,10 @@ fn run(
         if !input_monitoring_granted() {
             // Asks macOS to list the app under Input Monitoring.
             let _ = RightCommandKey::spawn(|_| {});
-            eprintln!("{}", HotkeyError::NoPermission);
+            tell(
+                &HotkeyError::NoPermission.to_string(),
+                Some(Pane::InputMonitoring),
+            );
             return ExitCode::from(exit::NO_KEY);
         }
         println!("  teclado: permitido (⌘ derecha)");
@@ -144,11 +148,7 @@ fn run(
         Ok(dirs) => dirs,
         Err(missing) => {
             eprintln!("Faltan modelos:\n{missing}");
-            eprintln!(
-                "Bajalos una vez con (desde la carpeta de wawi2):\n  \
-                 cargo run --release -p wawi-stt-parakeet --bin stt-bench -- download\n  \
-                 cargo run --release -p wawi-tts-kokoro --bin tts-say -- download"
-            );
+            tell(&missing_models_help(), None);
             return ExitCode::from(exit::NO_MODELS);
         }
     };
@@ -298,7 +298,7 @@ fn run(
         ) {
             Ok(live) => Some(live),
             Err(AudioError::Microphone(message)) => {
-                eprintln!("{message}");
+                tell(&message, Some(Pane::Microphone));
                 return ExitCode::from(exit::NO_MIC);
             }
             Err(error) => {
@@ -375,7 +375,15 @@ fn run(
         match RightCommandKey::spawn(move |down| {
             let deaf = menu.as_ref().is_some_and(|controls| controls.deaf());
             match gate.key(down, deaf) {
-                Some(true) => ptt.set_held(true),
+                Some(true) => {
+                    ptt.set_held(true);
+                    let _ = keys.send(Input::Note("key down"));
+                }
+                None if down && deaf => {
+                    let _ = keys.send(Input::Note(
+                        "key down ignorada: «Dejar de escuchar» está activo",
+                    ));
+                }
                 Some(false) => {
                     ptt.set_held(false);
                     let _ = keys.send(Input::KeyReleased(Instant::now()));
@@ -439,6 +447,30 @@ fn run(
     }
 }
 
+/// Says it on stderr. From Wawi.app, where nobody reads it, also opens the
+/// pane (if any) and shows a message box.
+fn tell(message: &str, pane: Option<Pane>) {
+    eprintln!("{message}");
+    if launch::from_bundle() && !io::stderr().is_terminal() {
+        if let Some(pane) = pane {
+            pane.open();
+        }
+        launch::alert("Wawi", message);
+    }
+}
+
+/// How to get the models: `wawi2 setup`, with the path to this binary when
+/// it lives in Wawi.app.
+fn missing_models_help() -> String {
+    let command = match (launch::from_bundle(), std::env::current_exe()) {
+        (true, Ok(exe)) => format!("\"{}\" setup", exe.display()),
+        _ => "wawi2 setup   (desde el código: cargo run --release -p wawi-app -- setup)".to_owned(),
+    };
+    format!("Faltan los modelos de voz. Bajalos una vez, desde la Terminal, con:\n  {command}")
+}
+
+/// Only stats: sizes, and the marker a full hash check left (the hash runs
+/// once, in `wawi2 setup` or on the first start after a manual download).
 fn model_dirs() -> Result<(PathBuf, PathBuf), String> {
     let mut missing = String::new();
     let stt = stt_model::model_dir(&PARAKEET_TDT_V3_INT8).map_err(|e| e.to_string())?;
@@ -456,7 +488,9 @@ fn model_dirs() -> Result<(PathBuf, PathBuf), String> {
     }
 }
 
-/// Enter ends the session. A closed stdin (a pipe) does not.
+/// Enter ends the session. A closed stdin (a pipe), or /dev/null as when
+/// opened from the Finder, does not: `read_line` gives 0 or an error once and
+/// the thread ends, no loop. «Salir» in the menu quits there.
 fn spawn_enter_to_quit(tx: Sender<Input>) {
     thread::spawn(move || {
         let mut line = String::new();

@@ -21,6 +21,7 @@
 
 mod desktop;
 mod frames;
+mod secret;
 mod views;
 
 use std::cell::RefCell;
@@ -551,6 +552,15 @@ impl Ui {
                 if let Some(m) = &mut self.moving {
                     m.walker.wander_soon(now);
                 }
+            }
+            Update::AskSecret(ask) => {
+                // After this update, outside the UI's borrow: the dialog
+                // runs its own loop and her timers keep firing.
+                DispatchQueue::main().exec_async(move || {
+                    if let Some(mtm) = MainThreadMarker::new() {
+                        secret::ask(mtm, ask);
+                    }
+                });
             }
             Update::Close => self.close(),
         }
