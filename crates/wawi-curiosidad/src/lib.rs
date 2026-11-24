@@ -283,6 +283,10 @@ impl Servidor {
             self.log.line("mirar: pausada");
             return Self::text(PAUSADA, true);
         }
+        if let Some(why) = self.sin_cupo(now) {
+            self.log.line(&format!("mirar: {why}"));
+            return Self::text(&format!("No puedo mirar ahora: {why}."), true);
+        }
         let senales = (self.sondas_rapidas)();
         if !senales.permiso {
             self.log.line("mirar: sin permiso de Grabación de pantalla");
@@ -315,8 +319,20 @@ impl Servidor {
         }
     }
 
+    /// While `<home>/cupo.json` says the Claude subscription is out of
+    /// quota: why no look now. A file read, only when a look is considered.
+    fn sin_cupo(&self, now: i64) -> Option<String> {
+        let now = now.max(0) as u64;
+        wawi_brain_claude::cupo::active(&self.home, now)
+            .map(|held| wawi_brain_claude::cupo::skipped(&held, now))
+    }
+
     /// A short line when it is a good moment for a look, else nothing.
     pub fn momento(&self, now: i64) -> String {
+        if let Some(why) = self.sin_cupo(now) {
+            self.log.line(&format!("momento: no ({why})"));
+            return String::new();
+        }
         let local = self.clock.local(now);
         let midnight = self
             .clock

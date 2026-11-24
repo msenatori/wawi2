@@ -129,6 +129,11 @@ pub fn puede(ctx: &Contexto<'_>, manual: bool) -> Result<PathBuf, String> {
     if !c.activo {
         return Err("apagado (activo = false en autoarreglo/config.toml)".into());
     }
+    // Out of Claude quota: wait for the reset (`<home>/cupo.json`).
+    let now_s = ctx.clock.now().max(0) as u64;
+    if let Some(held) = wawi_brain_claude::cupo::active(ctx.home, now_s) {
+        return Err(wawi_brain_claude::cupo::skipped(&held, now_s));
+    }
     let repo = c
         .repo()
         .ok_or("no sé dónde está el repo (repo en autoarreglo/config.toml)")?;
@@ -266,7 +271,45 @@ pub fn intentar(ctx: &Contexto<'_>, manual: bool, solo: Option<&str>) -> Fin {
         Fin::Nada(reason) => ctx.log.line(&format!("intento {id}: no siguió: {reason}")),
         Fin::Propuesta(_) => ctx.log.line(&format!("intento {id}: propuesto")),
     }
+    if let Some(why) = could_not_run(&outcome) {
+        avisar_no_corrio(ctx, &why);
+    }
     outcome
+}
+
+/// Whether the attempt could not run for a reason the owner should hear
+/// about: the worktree or the model broke, not a fix the gates turned down
+/// (that is the normal outcome) and not the usage limit (Wawi says that
+/// herself). A red base already leaves its own fact.
+pub fn could_not_run(outcome: &Fin) -> Option<String> {
+    let reason = match outcome {
+        Fin::Nada(reason) | Fin::Fallo(reason) => reason,
+        Fin::Propuesta(_) => return None,
+    };
+    let broke = reason.starts_with("no pude crear el worktree")
+        || reason.contains("claude falló")
+        || reason.contains("claude no devolvió")
+        || reason.contains("se le acabó el tiempo");
+    (broke && !reason.contains("sin cupo")).then(|| reason.clone())
+}
+
+/// One notice a day at most (`wawi_plugins::avisos`), and the last failure
+/// for the Settings window.
+fn avisar_no_corrio(ctx: &Contexto<'_>, why: &str) {
+    let why = crate::scrub::scrub(why);
+    wawi_plugins::fallos::registrar(
+        ctx.home,
+        "autoarreglo",
+        wawi_plugins::fallos::Tipo::NoCorrio,
+        &why,
+        &ctx.clock.local_now(),
+    );
+    let say = format!("Quise arreglarme sola pero no pude terminar: {why}.");
+    match wawi_plugins::avisos::plugin_notice(ctx.home, "autoarreglo", &say, ctx.clock) {
+        Ok(true) => ctx.log.line("aviso al dueño: no pude correr el intento"),
+        Ok(false) => {}
+        Err(e) => ctx.log.line(&format!("no pude dejar el aviso: {e}")),
+    }
 }
 
 fn record_attempt(

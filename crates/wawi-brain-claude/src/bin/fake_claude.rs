@@ -10,6 +10,10 @@
 //! - `hang`: says one sentence and ignores the interrupt.
 //! - `die`: starts a sentence and exits with an error.
 //! - `fail`: ends the turn with an error result.
+//! - `limit SECONDS`: refused for the usage limit, the way Claude Code
+//!   2.1.331 says it: a `rate_limit_event`, the assistant message that wraps
+//!   the API error and the `result`, with the reset SECONDS from now (`0`:
+//!   no reset given).
 //! - `prompt`: says the last line of its system prompt.
 //! - `compact`: reports a compaction of the conversation, then says "Listo.".
 //!
@@ -244,6 +248,34 @@ impl Fake {
                 std::process::exit(3);
             }
             "fail" => result(true, &["fallo simulado"]),
+            "limit" => {
+                let seconds: u64 = rest.trim().parse().unwrap_or(0);
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                let mut info = json!({ "status": "rejected", "rateLimitType": "five_hour" });
+                if seconds > 0 {
+                    info["resetsAt"] = json!(now + seconds);
+                    out(
+                        json!({ "type": "rate_limit_event", "rate_limit_info": info, "uuid": "u1", "session_id": self.session }),
+                    );
+                }
+                let line = "You've hit your limit · resets 6pm";
+                out(json!({
+                    "type": "assistant",
+                    "message": { "role": "assistant", "content": [{ "type": "text", "text": line }] },
+                    "parent_tool_use_id": null,
+                    "error": "rate_limit",
+                    "is_api_error_message": true,
+                    "api_error": "usage_limit_reached",
+                    "api_error_params": { "rate_limit_info": info },
+                }));
+                out(json!({
+                    "type": "result", "subtype": "success", "is_error": true,
+                    "api_error": "usage_limit_reached", "result": line,
+                }));
+            }
             "compact" => {
                 out(
                     json!({ "type": "system", "subtype": "compact_boundary", "session_id": self.session, "compact_metadata": { "trigger": "auto" } }),

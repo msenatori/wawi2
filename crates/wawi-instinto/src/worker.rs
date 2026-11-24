@@ -79,6 +79,19 @@ pub fn mirar(
     }
     let mut items = resultado.items;
     if let (Some(juzgar), Some(juez), Some(list)) = (&pregunta.vigia.juzgar, juez, items.as_mut()) {
+        // Out of Claude quota: the new items wait, unjudged and still new.
+        let now = ctx.clock.now().max(0) as u64;
+        if let Some(held) = wawi_brain_claude::cupo::active(ctx.home, now) {
+            let motivo = wawi_brain_claude::cupo::skipped(&held, now);
+            log.line(&format!("{}: {motivo}", pregunta.id));
+            return (
+                Lectura::Espera {
+                    hasta: held.hasta as i64,
+                    motivo,
+                },
+                Some(valor),
+            );
+        }
         let fecha = ctx.clock.local_now().iso_date();
         let list_now: Vec<Value> = list.iter().take(crate::juez::MAX_ITEMS).cloned().collect();
         match juez.juzgar(
@@ -277,6 +290,7 @@ impl Worker {
             Lectura::Cumple { .. } => "se cumplió".to_owned(),
             Lectura::NoCumple { .. } => "todavía no".to_owned(),
             Lectura::Error(e) => format!("error: {e}"),
+            Lectura::Espera { motivo, .. } => format!("espera: {motivo}"),
         };
         let (mut next, hecho) = motor::despues(estado, &pregunta, lectura, now, siguiente, repetir);
         if !next.fase.terminal() {
@@ -299,6 +313,16 @@ impl Worker {
                         .line(&format!("{}: no pude escribir el hecho: {e}", next.id));
                     return;
                 }
+            }
+            // A broken follow-up is the plugin's last failure, for Settings.
+            if next.fase == Fase::Rota {
+                wawi_plugins::fallos::registrar(
+                    &self.home,
+                    "instinto",
+                    wawi_plugins::fallos::Tipo::Rota,
+                    &hecho.decir,
+                    &self.clock.local_now(),
+                );
             }
         }
         self.log

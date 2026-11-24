@@ -20,6 +20,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
+use wawi_brain_claude::cupo;
 
 pub const MODELO: &str = "claude-sonnet-5-5";
 pub const ESFUERZO: &str = "low";
@@ -244,15 +245,18 @@ impl Vista {
     pub fn ver(&self, jpeg_base64: &str, espontanea: bool) -> Result<String, String> {
         let message = mensaje(jpeg_base64, espontanea);
         let started = Instant::now();
+        // `<home>/curiosidad/claude`: the home is two folders up.
+        let home = self.dir.parent().and_then(Path::parent);
         let first = match self.take_spare() {
-            Some(child) => run(child, &message, TIMEOUT),
-            None => self.spawn().and_then(|c| run(c, &message, TIMEOUT)),
+            Some(child) => run(child, &message, TIMEOUT, home),
+            None => self.spawn().and_then(|c| run(c, &message, TIMEOUT, home)),
         };
         let answer = match first {
             Ok(answer) => Ok(answer),
+            Err(why) if why == SIN_CUPO => Err(why),
             Err(_) => {
                 let left = TIMEOUT.saturating_sub(started.elapsed());
-                self.spawn().and_then(|c| run(c, &message, left))
+                self.spawn().and_then(|c| run(c, &message, left, home))
             }
         };
         // The next look finds a process ready.
@@ -270,9 +274,18 @@ impl Vista {
     }
 }
 
+/// Why a look failed when it ran into the usage limit.
+pub const SIN_CUPO: &str = "me quedé sin cupo de Claude";
+
 /// Feeds the message, closes stdin and reads the `result` line's
-/// structured output, within `timeout`.
-fn run(mut child: Child, message: &Value, timeout: Duration) -> Result<Value, String> {
+/// structured output, within `timeout`. A usage-limit refusal is noted in
+/// `<home>/cupo.json`, so the other services wait too.
+fn run(
+    mut child: Child,
+    message: &Value,
+    timeout: Duration,
+    home: Option<&Path>,
+) -> Result<Value, String> {
     let mut stdin = child.stdin.take().ok_or("claude sin entrada")?;
     let stdout = child.stdout.take().ok_or("claude sin salida")?;
     let line = format!("{message}\n");
@@ -302,6 +315,12 @@ fn run(mut child: Child, message: &Value, timeout: Duration) -> Result<Value, St
     let _ = child.kill();
     let _ = child.wait();
     let value = result.map_err(|_| "claude tardó demasiado o se cerró".to_owned())?;
+    if let Some(limit) = wawi_brain_claude::limit::from_value(&value) {
+        if let Some(home) = home {
+            cupo::note(home, limit, cupo::now(), "curiosidad");
+        }
+        return Err(SIN_CUPO.into());
+    }
     if value.get("is_error").and_then(Value::as_bool) == Some(true) {
         return Err("claude no pudo mirar".into());
     }

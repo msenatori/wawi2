@@ -74,6 +74,16 @@ pub enum Event {
         turn: TurnId,
         reason: String,
     },
+    /// The owner's subscription refused the brain for its usage limit. It
+    /// ends `turn` (if that turn is still running) like a failure, and starts
+    /// the limit (`limit.rs`). `resets_in_ms` is when the CLI said it
+    /// resets, if it did; `until` is that time in words for the owner
+    /// ("las 18:00"), filled in by the host, or empty.
+    UsageLimited {
+        turn: Option<TurnId>,
+        resets_in_ms: Option<u64>,
+        until: String,
+    },
     ToolFinished {
         turn: TurnId,
         call_id: String,
@@ -121,6 +131,7 @@ impl Event {
             Event::BrainToolCall { .. } => "brain_tool_call",
             Event::BrainDone { .. } => "brain_done",
             Event::BrainFailed { .. } => "brain_failed",
+            Event::UsageLimited { .. } => "usage_limited",
             Event::ToolFinished { .. } => "tool_finished",
             Event::RequestFloor { .. } => "request_floor",
             Event::Initiative { .. } => "initiative",
@@ -191,6 +202,8 @@ pub enum DiagnosticReason {
     InstinctQueueFull,
     /// The instinct's own deadline (`expires_in_ms`) passed.
     InstinctPastDue,
+    /// The subscription's usage limit: background work waits for the reset.
+    UsageLimited,
 }
 
 /// What the instinct gate did with a candidate, for the host that has to
@@ -268,6 +281,14 @@ pub enum Effect {
     InstinctDecided {
         id: String,
         outcome: InstinctOutcome,
+    },
+    /// The usage limit started (`limited`, trying again in `retry_in_ms`)
+    /// or ended. The host lets background services know (`<home>/cupo.json`)
+    /// and, when it ended and `told_owner`, has Wawi say she is back.
+    UsageLimit {
+        limited: bool,
+        retry_in_ms: u64,
+        told_owner: bool,
     },
     /// Something was dropped or gave up, on purpose. Never affects behaviour;
     /// it exists so that nothing disappears silently.

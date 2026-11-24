@@ -194,6 +194,13 @@ impl Observer {
                 call: any_call(rng),
             },
             75..=78 => Event::BrainDone { turn },
+            // Now and then the usage limit instead: short, so the limit does
+            // not hide everything else from the generator.
+            80 if rng.below(3) == 0 => Event::UsageLimited {
+                turn: Some(turn),
+                resets_in_ms: (rng.below(8) != 0).then(|| rng.below(20_000)),
+                until: "las 18:00".into(),
+            },
             79..=80 => Event::BrainFailed {
                 turn,
                 reason: "fake".into(),

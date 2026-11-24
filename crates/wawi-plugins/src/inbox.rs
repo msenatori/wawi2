@@ -32,6 +32,14 @@ pub const INCIDENTS: &str = "cola/incidentes";
 /// What the brain is told to do with an inbox item. Fixed on purpose: the
 /// item's own text is data, never the instruction.
 pub const INBOX_INSTRUCTION: &str = "Un proceso de fondo dejó este aviso para el dueño. Si vale la pena, decíselo en una o dos frases, con tus palabras. Si no, no digas nada.";
+/// For `origen: "aviso"`: background work that could not finish
+/// (`avisos.rs`).
+pub const NOTICE_INSTRUCTION: &str = "Algo de fondo no pudo terminar y el dueño lo tiene que saber. Contáselo en una frase corta, sin tecnicismos, y si hay algo que él pueda hacer, decíselo. Si ya no tiene sentido, no digas nada.";
+/// For `origen: "preguntas"`: a question the owner left unanswered
+/// (`preguntas.rs`).
+pub const QUESTION_INSTRUCTION: &str = "Antes le preguntaste esto al dueño y no te contestó. Si todavía tiene sentido, retomalo en una sola frase corta y natural, como «che, al final…?». No le reproches que no contestó. Si ya no importa o ya se resolvió, no digas nada.";
+/// For `origen: "cupo"`: the usage limit is over (the host writes it).
+pub const BACK_INSTRUCTION: &str = "Se terminó el límite de uso de tu suscripción y volviste. Antes le dijiste al dueño que le avisabas: decile en una frase corta y alegre que ya estás de vuelta.";
 /// The longest `decir` plus `contexto` that reaches the brain.
 const MAX_TEXT: usize = 4000;
 
@@ -46,6 +54,8 @@ pub struct Item {
     /// `urgencia: "alta"`: skips the gate's gap and hourly budget.
     pub urgent: bool,
     pub expires: Option<i64>,
+    /// `desde`: not before this Unix second (a local time in the file).
+    pub not_before: Option<i64>,
 }
 
 /// Item ids: letters, digits, `.`, `_` and `-`, up to 64.
@@ -82,17 +92,22 @@ pub fn parse_item(text: &str, clock: &dyn WallClock) -> Result<Item, String> {
         Some(Value::String(text)) => text.clone(),
         Some(other) => other.to_string(),
     };
-    let expires = match field("vence") {
-        None | Some("") => None,
-        Some(text) => {
-            let local = parse_local(text).ok_or("vence no es una hora local AAAA-MM-DDTHH:MM")?;
-            Some(
-                clock
-                    .epoch_of(local)
-                    .ok_or("vence no existe en este huso")?,
-            )
+    let local_field = |name: &str| -> Result<Option<i64>, String> {
+        match field(name) {
+            None | Some("") => Ok(None),
+            Some(text) => {
+                let local = parse_local(text)
+                    .ok_or(format!("{name} no es una hora local AAAA-MM-DDTHH:MM"))?;
+                Ok(Some(
+                    clock
+                        .epoch_of(local)
+                        .ok_or(format!("{name} no existe en este huso"))?,
+                ))
+            }
         }
     };
+    let expires = local_field("vence")?;
+    let not_before = local_field("desde")?;
     Ok(Item {
         urgent: field("urgencia") == Some("alta"),
         id: id.to_owned(),
@@ -101,6 +116,7 @@ pub fn parse_item(text: &str, clock: &dyn WallClock) -> Result<Item, String> {
         context,
         priority,
         expires,
+        not_before,
     })
 }
 
@@ -114,7 +130,13 @@ impl Item {
         InstinctCandidate {
             id: format!("cola:{}", self.id),
             key: format!("cola/{}/{}", self.origin, self.id),
-            say: INBOX_INSTRUCTION.into(),
+            say: match self.origin.as_str() {
+                crate::avisos::ORIGIN => NOTICE_INSTRUCTION,
+                crate::preguntas::ORIGIN => QUESTION_INSTRUCTION,
+                crate::avisos::BACK_ORIGIN => BACK_INSTRUCTION,
+                _ => INBOX_INSTRUCTION,
+            }
+            .into(),
             context: truncate(&data, MAX_TEXT),
             priority: self.priority,
             cooldown_ms: None,
@@ -235,6 +257,8 @@ impl Inbox {
                     self.finish_file(&item.id, &text, "vencido", &why, clock.local_now());
                 }
                 Ok(item) if self.waiting.get(&item.id).is_some_and(|w| w.at > now) => {}
+                // Not yet: it stays in `new/` until its `desde`.
+                Ok(item) if item.not_before.is_some_and(|at| at > now) => {}
                 Ok(item) => {
                     let candidate = item.candidate(minute, now);
                     self.offered.insert(candidate.id.clone(), item.id.clone());
@@ -260,7 +284,17 @@ impl Inbox {
     /// The gate held it back for timing: it stays in `new/` and is offered
     /// again at `retry_at` (a Unix second), until its `vence`.
     pub fn postponed(&mut self, candidate_id: &str, reason: DiagnosticReason, retry_at: i64) {
-        if let Some(id) = self.offered.remove(candidate_id) {
+        // Also one whose turn had started: the usage limit refused it.
+        let started = self
+            .turns
+            .iter()
+            .find(|(_, id)| candidate_id.strip_prefix("cola:") == Some(id.as_str()))
+            .map(|(turn, _)| *turn);
+        let id = self
+            .offered
+            .remove(candidate_id)
+            .or_else(|| started.and_then(|turn| self.turns.remove(&turn)));
+        if let Some(id) = id {
             self.waiting.insert(
                 id,
                 Retry {
@@ -270,6 +304,19 @@ impl Inbox {
             );
             self.save_waiting();
         }
+    }
+
+    /// The owner answered the question behind a waiting item: it is done,
+    /// as `respondida`, unless it is already being said. True if it was
+    /// waiting.
+    pub fn answered(&mut self, id: &str, now: Civil) -> bool {
+        let in_flight =
+            self.offered.values().any(|o| o == id) || self.turns.values().any(|t| t == id);
+        if in_flight || !self.root.join("new").join(format!("{id}.json")).exists() {
+            return false;
+        }
+        self.finish(id, "respondida", "el dueño la contestó después", now);
+        true
     }
 
     /// The retry times of postponed items.
@@ -422,6 +469,72 @@ mod tests {
         assert!(inbox.scan(clock.as_ref(), &mut notes).is_empty());
         assert!(!home.join(FACTS).join("new").join("a1.json").exists());
         assert_eq!(cur(&home, "a1")["decir"], "Terminó el build");
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn desde_holds_an_item_and_the_origin_picks_wawis_instruction() {
+        let home = temp("desde");
+        let clock = FakeClock::at(Civil::date(2026, 11, 23).at(10, 0, 0), -3);
+        let mut inbox = Inbox::open(&home).unwrap();
+        drop_item(
+            &home,
+            "pregunta-1",
+            r#"{"id":"pregunta-1","origen":"preguntas","decir":"Le preguntaste: «¿Fuiste al cumple?»","urgencia":"baja","desde":"2026-11-23T12:00"}"#,
+        );
+        drop_item(
+            &home,
+            "aviso-x",
+            r#"{"id":"aviso-x","origen":"aviso","decir":"Linear pide permiso."}"#,
+        );
+        let mut notes = Vec::new();
+        let found = inbox.scan(clock.as_ref(), &mut notes);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].say, NOTICE_INSTRUCTION);
+        clock.advance(2 * 3600);
+        let found = inbox.scan(clock.as_ref(), &mut notes);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].say, QUESTION_INSTRUCTION);
+        assert_eq!(found[0].priority, Priority::Low);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn a_turn_refused_by_the_usage_limit_puts_its_item_back_to_wait() {
+        let home = temp("cupo");
+        let clock = FakeClock::at(Civil::date(2026, 11, 23).at(10, 0, 0), -3);
+        let mut inbox = Inbox::open(&home).unwrap();
+        drop_item(&home, "pr", r#"{"id":"pr","decir":"Aprobaron el PR"}"#);
+        let mut notes = Vec::new();
+        assert_eq!(inbox.scan(clock.as_ref(), &mut notes).len(), 1);
+        inbox.started("cola:pr", TurnId(3));
+        inbox.postponed(
+            "cola:pr",
+            DiagnosticReason::UsageLimited,
+            clock.now() + 3600,
+        );
+        // Not "callado": it waits in new/ for the reset.
+        assert!(inbox.all_silent(clock.local_now()).is_empty());
+        assert!(home.join(FACTS).join("new/pr.json").exists());
+        assert_eq!(inbox.waiting()["pr"].reason, "UsageLimited");
+        clock.advance(3601);
+        assert_eq!(inbox.scan(clock.as_ref(), &mut notes).len(), 1);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn a_question_answered_late_is_acknowledged_and_never_retaken() {
+        let home = temp("respondida");
+        let clock = FakeClock::at(Civil::date(2026, 11, 23).at(10, 0, 0), -3);
+        let mut inbox = Inbox::open(&home).unwrap();
+        drop_item(
+            &home,
+            "pregunta-2",
+            r#"{"id":"pregunta-2","origen":"preguntas","decir":"x","desde":"2026-11-23T12:00"}"#,
+        );
+        assert!(inbox.answered("pregunta-2", clock.local_now()));
+        assert_eq!(cur(&home, "pregunta-2")["resultado"], "respondida");
+        assert!(!inbox.answered("pregunta-2", clock.local_now()));
         let _ = std::fs::remove_dir_all(&home);
     }
 

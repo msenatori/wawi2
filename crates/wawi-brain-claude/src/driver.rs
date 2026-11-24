@@ -20,6 +20,7 @@ use wawi_core::{
 };
 
 use crate::ClaudeConfig;
+use crate::limit::Limit;
 use crate::protocol::{self, Incoming};
 use crate::speech::SentenceBuffer;
 
@@ -83,6 +84,8 @@ struct Active {
     turn: TurnId,
     cancelled: bool,
     sentences: SentenceBuffer,
+    /// The usage limit refused this turn (seen before its `result`).
+    limit: Option<Limit>,
 }
 
 /// A tool call from claude waiting for the core's `ToolResultToBrain`. Its id
@@ -123,6 +126,9 @@ pub(crate) struct Driver {
     memory_sent: Option<String>,
     trace: Option<(File, Instant)>,
     swaps: Arc<AtomicU64>,
+    /// The last `rate_limit_event` said requests are refused until then
+    /// (Unix seconds): the reset when a refusal does not carry its own.
+    refused_until: Option<u64>,
 }
 
 impl Driver {
@@ -151,6 +157,7 @@ impl Driver {
             calls: HashMap::new(),
             memory_sent: None,
             trace: None,
+            refused_until: None,
         }
     }
 
@@ -453,6 +460,7 @@ impl Driver {
             turn: start.turn,
             cancelled: false,
             sentences: SentenceBuffer::default(),
+            limit: None,
         });
     }
 
@@ -555,7 +563,18 @@ impl Driver {
                 }
             }
             Incoming::BlockStop => self.flush_text(),
-            Incoming::Result { is_error, reason } => self.on_result(is_error, reason),
+            Incoming::Limit(limit) => {
+                if let Some(active) = self.active.as_mut() {
+                    active.limit =
+                        Some(active.limit.map_or(limit, |seen| merge_limit(seen, limit)));
+                }
+            }
+            Incoming::RefusedUntil(at) => self.refused_until = Some(at),
+            Incoming::Result {
+                is_error,
+                reason,
+                limit,
+            } => self.on_result(is_error, reason, limit),
         }
     }
 
@@ -568,15 +587,32 @@ impl Driver {
         }
     }
 
-    fn on_result(&mut self, is_error: bool, reason: String) {
+    fn on_result(&mut self, is_error: bool, reason: String, limit: Option<Limit>) {
         self.flush_text();
         let Some(active) = self.end_active() else {
             return;
         };
         self.turns_done += 1;
         self.interrupt_deadline = None;
-        if !active.cancelled {
-            let turn = active.turn;
+        let turn = active.turn;
+        let limit = match (is_error, active.limit, limit) {
+            (false, _, _) => None,
+            (true, Some(seen), Some(said)) => Some(merge_limit(seen, said)),
+            (true, seen, said) => seen.or(said),
+        };
+        if let Some(limit) = limit {
+            // Even for a cancelled turn: the limit is real, and the core
+            // starts it whatever turn is running.
+            let resets_at = limit.resets_at.or(self.refused_until.take());
+            self.emit(Event::UsageLimited {
+                turn: Some(turn),
+                resets_in_ms: resets_at.and_then(resets_in_ms),
+                until: String::new(),
+            });
+        } else if !active.cancelled {
+            if !is_error {
+                self.refused_until = None;
+            }
             self.emit(if is_error {
                 Event::BrainFailed { turn, reason }
             } else {
@@ -837,6 +873,25 @@ impl Driver {
 }
 
 /// Writes one message to a process. Errors are ignored, as in `send`.
+/// Keeps the reset time from whichever report had one.
+fn merge_limit(seen: Limit, more: Limit) -> Limit {
+    Limit {
+        resets_at: seen.resets_at.or(more.resets_at),
+    }
+}
+
+/// From a Unix second to "in this many milliseconds"; `None` if it passed.
+fn resets_in_ms(resets_at: u64) -> Option<u64> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_millis() as u64;
+    resets_at
+        .checked_mul(1000)
+        .and_then(|at| at.checked_sub(now))
+        .filter(|left| *left > 0)
+}
+
 fn write_to(process: &mut Process, value: &Value) {
     let line = format!("{value}\n");
     let _ = process

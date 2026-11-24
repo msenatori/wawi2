@@ -1296,6 +1296,7 @@ dependencies = [
  "serde",
  "serde_json",
  "toml",
+ "wawi-brain-claude",
  "wawi-plugins",
  "wawi-tools",
 ]
@@ -1343,6 +1344,7 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+ "wawi-brain-claude",
  "wawi-core",
  "wawi-instinto",
  "wawi-plugins",
@@ -1359,6 +1361,7 @@ dependencies = [
  "serde_json",
  "toml",
  "ureq",
+ "wawi-brain-claude",
  "wawi-core",
  "wawi-plugins",
  "wawi-tools",

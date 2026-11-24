@@ -30,6 +30,13 @@ pub enum Lectura {
     },
     /// The source, the extraction or the predicate failed.
     Error(String),
+    /// It could not be judged now for a reason that is nobody's failure
+    /// (the Claude usage limit): look again at `hasta`, with the memory as
+    /// it was (the new items stay new) and no failure counted.
+    Espera {
+        hasta: i64,
+        motivo: String,
+    },
 }
 
 /// A fact for `<home>/cola/hechos`.
@@ -115,6 +122,11 @@ pub fn despues(
     }
     estado.actualizado = now;
     match lectura {
+        Lectura::Espera { hasta, motivo } => {
+            estado.ultimo_error = Some(truncate(&motivo, 300));
+            estado.proxima = hasta.max(now + 60);
+            (estado, None)
+        }
         Lectura::Error(error) => {
             estado.fallos += 1;
             estado.ultimo_error = Some(truncate(&error, 300));
@@ -310,6 +322,20 @@ mod tests {
         let (e, h) = despues(e, &p, Lectura::Error("HTTP 500".into()), 0, 600, false);
         assert!(h.is_none());
         assert_eq!((e.fallos, e.proxima), (1, 1200));
+        // The usage limit is nobody's failure: no count, retried at its end.
+        let (e, h2) = despues(
+            e,
+            &p,
+            Lectura::Espera {
+                hasta: 3_000,
+                motivo: "sin cupo".into(),
+            },
+            0,
+            600,
+            false,
+        );
+        assert!(h2.is_none());
+        assert_eq!((e.fallos, e.proxima), (1, 3_000));
         let (e, _) = despues(e, &p, Lectura::Error("HTTP 500".into()), 1200, 0, false);
         assert_eq!(e.proxima, 1200 + 2400);
         // A good look resets the count.

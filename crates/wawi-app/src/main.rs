@@ -551,6 +551,7 @@ impl<W: Write> Sim<W> {
             | Effect::FloorQueued { .. }
             | Effect::SuggestionAdded { .. }
             | Effect::InstinctDecided { .. }
+            | Effect::UsageLimit { .. }
             | Effect::Diagnostic { .. } => {}
         }
         Ok(())
@@ -611,6 +612,11 @@ fn describe(effect: &Effect) -> String {
         }
         Effect::InstinctDecided { id, outcome } => format!("instinct_decided {id}: {outcome:?}"),
         Effect::Diagnostic { event, reason } => format!("diagnostic {event}: {reason:?}"),
+        Effect::UsageLimit {
+            limited,
+            retry_in_ms,
+            told_owner,
+        } => format!("usage_limit {limited} (retry {retry_in_ms} ms, told {told_owner})"),
     }
 }
 

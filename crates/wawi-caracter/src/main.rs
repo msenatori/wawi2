@@ -29,7 +29,10 @@ fn main() -> ExitCode {
                         Aprendiz::new(
                             libro,
                             // An empty folder: no project file near the model.
-                            Box::new(ClaudeCli::new(&home.join(DIR).join("claude"))),
+                            Box::new(
+                                ClaudeCli::new(&home.join(DIR).join("claude"))
+                                    .con_cupo(&home, "caracter"),
+                            ),
                             Rc::new(SystemClock::new()),
                             MODELO,
                             ESFUERZO,

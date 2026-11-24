@@ -1786,3 +1786,153 @@ fn a_curiosity_look_is_now_or_never() {
     assert_no_fx!(s, Effect::StartBrain { .. });
     assert_eq!(s.dialogue.instincts_waiting(), 0);
 }
+
+// The usage limit ("se quedó sin cupo").
+
+const MIN: u64 = 60_000;
+
+fn limited<'a>(s: &'a mut Scenario, resets_in_ms: Option<u64>, until: &str) -> &'a mut Scenario {
+    let turn = s.last_turn;
+    s.send(Event::UsageLimited {
+        turn: Some(turn),
+        resets_in_ms,
+        until: until.into(),
+    })
+}
+
+#[test]
+fn an_owner_turn_refused_by_the_limit_hears_it_once_locally() {
+    let mut s = thinking("¿qué tengo hoy?");
+    limited(&mut s, Some(90 * MIN), "las 18:00").assert_state(K::Speaking);
+    assert_eq!(
+        s.spoken(),
+        ["Uy, me quedé sin cupo hasta las 18:00. Te aviso cuando vuelva."]
+    );
+    assert_fx!(s, Effect::UsageLimit { limited: true, retry_in_ms, told_owner: false }
+        if *retry_in_ms == 91 * MIN);
+    assert_no_fx!(
+        s,
+        Effect::Speak {
+            kind: SpeechKind::Failure(_),
+            ..
+        }
+    );
+    s.playback_finished().assert_state(K::Idle);
+    // The next owner turn does not reach the brain: a short line, at once.
+    s.tick(MIN).say("¿y el clima?").assert_state(K::Speaking);
+    assert_no_fx!(s, Effect::StartBrain { .. });
+    assert_eq!(s.spoken(), ["Sigo sin cupo hasta las 18:00, aguantame."]);
+    s.playback_finished().assert_state(K::Idle);
+    // Routes still answer.
+    s.dialogue
+        .router_mut()
+        .add(Box::new(TimeRoute::new(FixedClock(16, 20))));
+    s.say("qué hora es");
+    assert!(s.spoken()[0].contains("16:20"), "{:?}", s.spoken());
+}
+
+#[test]
+fn background_work_waits_out_the_limit_and_she_comes_back_through_the_gate() {
+    let mut s = thinking("hola");
+    limited(&mut s, Some(30 * MIN), "las 18:00");
+    s.playback_finished().assert_state(K::Idle);
+    // Initiative is dropped; an instinct is postponed until the reset.
+    s.initiative("mirá algo");
+    assert_no_fx!(s, Effect::StartBrain { .. });
+    assert_fx!(
+        s,
+        Effect::Diagnostic {
+            reason: Reason::UsageLimited,
+            ..
+        }
+    );
+    s.tick(10 * MIN)
+        .send(instinct("cola:x", "cola/x/y", "Aprobaron el PR"));
+    assert_no_fx!(s, Effect::StartBrain { .. });
+    assert_fx!(s, Effect::InstinctDecided {
+        id,
+        outcome: wawi_core::InstinctOutcome::Postponed { reason: Reason::UsageLimited, retry_in_ms },
+    } if id == "cola:x" && *retry_in_ms == 21 * MIN);
+    // A reminder still speaks: it needs no brain.
+    s.floor(Priority::High, "Acordate del mate.");
+    assert_eq!(s.spoken(), ["Acordate del mate."]);
+    s.playback_finished();
+    // At the reset (plus the margin) the limit ends, and since the owner
+    // heard of it, the host is asked to say she is back.
+    s.tick(30 * MIN);
+    assert_no_fx!(s, Effect::UsageLimit { .. });
+    s.tick(31 * MIN);
+    assert_fx!(
+        s,
+        Effect::UsageLimit {
+            limited: false,
+            told_owner: true,
+            ..
+        }
+    );
+    assert!(!s.dialogue.usage_limited());
+    s.say("¿y ahora?").assert_state(K::Thinking);
+}
+
+#[test]
+fn a_limit_found_by_initiative_stays_silent_and_postpones_its_instinct() {
+    let mut s = Scenario::new();
+    s.send(instinct("cola:x", "cola/x/y", "Aprobaron el PR"))
+        .assert_state(K::Thinking);
+    limited(&mut s, Some(60 * MIN), "las 18:00").assert_state(K::Idle);
+    assert_no_fx!(s, Effect::Speak { .. });
+    assert_fx!(s, Effect::InstinctDecided {
+        id,
+        outcome: wawi_core::InstinctOutcome::Postponed { reason: Reason::UsageLimited, .. },
+    } if id == "cola:x");
+    // Nobody was told, so its end says nothing; the owner hears it whole
+    // the first time they ask.
+    s.say("hola").assert_state(K::Speaking);
+    assert_eq!(
+        s.spoken(),
+        ["Uy, me quedé sin cupo hasta las 18:00. Te aviso cuando vuelva."]
+    );
+}
+
+#[test]
+fn with_no_known_reset_she_backs_off_and_the_owner_may_try_now_and_then() {
+    let mut s = thinking("hola");
+    limited(&mut s, None, "").assert_state(K::Speaking);
+    assert_eq!(
+        s.spoken(),
+        ["Uy, me quedé sin cupo por un rato. Te aviso cuando vuelva."]
+    );
+    assert_fx!(s, Effect::UsageLimit { limited: true, retry_in_ms, .. } if *retry_in_ms == 15 * MIN);
+    s.playback_finished();
+    s.tick(MIN).say("¿ya?").assert_state(K::Speaking);
+    assert_eq!(s.spoken(), ["Sigo sin cupo, aguantame un rato."]);
+    s.playback_finished();
+    // Five minutes after the hit an owner turn gets a real try.
+    s.tick(5 * MIN).say("¿y ahora?").assert_state(K::Thinking);
+    limited(&mut s, None, "").assert_state(K::Speaking);
+    assert_eq!(s.spoken(), ["Sigo sin cupo, aguantame un rato."]);
+    assert_fx!(s, Effect::UsageLimit { limited: true, retry_in_ms, .. } if *retry_in_ms == 30 * MIN);
+    s.playback_finished();
+    s.tick(35 * MIN);
+    assert_fx!(
+        s,
+        Effect::UsageLimit {
+            limited: false,
+            told_owner: true,
+            ..
+        }
+    );
+}
+
+#[test]
+fn a_stale_limit_report_still_starts_the_limit_but_touches_no_turn() {
+    let mut s = thinking("hola");
+    s.send(Event::UsageLimited {
+        turn: Some(TurnId(99)),
+        resets_in_ms: Some(MIN),
+        until: "las 9:00".into(),
+    })
+    .assert_state(K::Thinking);
+    assert!(s.dialogue.usage_limited());
+    assert_no_fx!(s, Effect::Speak { .. });
+}

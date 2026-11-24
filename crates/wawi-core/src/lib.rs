@@ -5,6 +5,7 @@ pub mod dialogue;
 pub mod event;
 pub mod instinct;
 pub mod json;
+pub mod limit;
 pub mod plugin;
 pub mod policy;
 pub mod registry;
@@ -18,6 +19,7 @@ pub use event::{
     SpeechKind, ToolCall, ToolOutcome, TurnId,
 };
 pub use instinct::{GateConfig, InstinctCandidate, InstinctGate};
+pub use limit::{LimitConfig, LimitEnded, LimitLine, UsageLimit};
 pub use plugin::{AudioOut, Brain, BrainContext, EventSink, Stt, Tool, Tts};
 pub use policy::{INITIATIVE_NO_CONFIRMATION, INITIATIVE_READ_ONLY, TurnSource};
 pub use registry::{PermissionLevel, Registry, ToolSpec};

@@ -16,6 +16,8 @@ license.workspace = true
 wawi-plugins = { path = "../wawi-plugins" }
 # The system clock and the `claude` program lookup.
 wawi-instinto = { path = "../wawi-instinto" }
+# The usage limit: how the CLI says it and `<home>/cupo.json`.
+wawi-brain-claude = { path = "../wawi-brain-claude" }
 # Civil times, WallClock and FakeClock for tests.
 wawi-tools = { path = "../wawi-tools" }
 serde = { version = "=1.0.229", features = ["derive"] }

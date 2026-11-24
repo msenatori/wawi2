@@ -573,3 +573,67 @@ fn discarding_is_wont_fix_and_a_moved_branch_that_conflicts_is_refused() {
     );
     let _ = std::fs::remove_dir_all(&root);
 }
+
+#[test]
+fn out_of_quota_it_waits_and_when_the_model_breaks_the_owner_hears_once() {
+    let root = temp("no-corrio");
+    let (home, repo) = (root.join("home"), root.join("repo"));
+    comun::repo(&repo, true);
+    let clock = clock();
+    let log = Log::none();
+    let mut config = config(&repo);
+    config.max_intentos_dia = 10;
+    config.reintento_dias = 0;
+    incident(&home, "turno_lento", "cerebro", 3);
+    worker(&home, clock.clone()).absorber();
+    let cmds = FakeComandos::green();
+    // Out of Claude quota: no attempt, no model call, nothing to say.
+    let now = clock.now() as u64;
+    wawi_brain_claude::cupo::write(
+        &home,
+        &wawi_brain_claude::cupo::Cupo {
+            hasta: now + 600,
+            sabido: true,
+            desde: now,
+            origen: "wawi".into(),
+        },
+    )
+    .unwrap();
+    let motor = FakeMotor::fixing(Box::new(add_fix));
+    let fin = intento::intentar(
+        &ctx(&home, &config, &clock, &motor, &cmds, &log),
+        true,
+        None,
+    );
+    assert!(
+        matches!(&fin, Fin::Nada(r) if r.contains("sin cupo")),
+        "{fin:?}"
+    );
+    assert!(motor.calls.borrow().is_empty());
+    assert!(facts(&home).is_empty());
+    // After the reset the model breaks (a revoked login): one notice a day.
+    clock.advance(601);
+    let mut broken = FakeMotor::fixing(Box::new(add_fix));
+    broken.author = Err(Falla {
+        motivo: "claude falló: OAuth token revoked".into(),
+        costo_usd: 0.0,
+    });
+    for _ in 0..2 {
+        let fin = intento::intentar(
+            &ctx(&home, &config, &clock, &broken, &cmds, &log),
+            true,
+            None,
+        );
+        assert!(
+            matches!(&fin, Fin::Fallo(r) if r.contains("claude falló")),
+            "{fin:?}"
+        );
+        clock.advance(60);
+    }
+    let said = facts(&home);
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert!(said[0].contains("no pude terminar") && said[0].contains(r#""origen":"aviso""#));
+    let fallo = wawi_plugins::fallos::leer(&home, "autoarreglo").unwrap();
+    assert_eq!(fallo.tipo, "no_corrio");
+    let _ = std::fs::remove_dir_all(&root);
+}

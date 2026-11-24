@@ -280,6 +280,10 @@ impl Servidor {
                     )
                 }
                 Ok((Lectura::Error(e), _)) => return Err(format!("la probé y falló: {e}")),
+                // Never from a dry run (no judge), but just in case: it waits.
+                Ok((Lectura::Espera { motivo, .. }, _)) => {
+                    format!("No la pude probar ahora ({motivo}): la dejé igual.")
+                }
                 Ok((Lectura::Cumple { valor, .. }, _)) if !repetir => {
                     return Err(format!(
                         "ya se cumple ahora (vale {}). No hace falta vigilarlo: decíselo al dueño.",

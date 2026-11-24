@@ -232,6 +232,9 @@ pub fn bounded(
 pub struct ClaudeCli {
     pub programa: PathBuf,
     pub nice: i32,
+    /// Wawi's home, to note the usage limit in `<home>/cupo.json` when a
+    /// call runs into it. `None`: not noted.
+    pub home: Option<PathBuf>,
 }
 
 impl ClaudeCli {
@@ -239,7 +242,13 @@ impl ClaudeCli {
         Self {
             programa: default_program(),
             nice,
+            home: None,
         }
+    }
+
+    pub fn con_cupo(mut self, home: &Path) -> Self {
+        self.home = Some(home.to_path_buf());
+        self
     }
 }
 
@@ -309,6 +318,17 @@ impl Motor for ClaudeCli {
             self.nice,
         )
         .map_err(Falla::new)?;
+        if let Some(limit) = wawi_brain_claude::cupo::in_output(&fin.stdout) {
+            let now = wawi_brain_claude::cupo::now();
+            let motivo = match &self.home {
+                Some(home) => {
+                    let held = wawi_brain_claude::cupo::note(home, limit, now, "autoarreglo");
+                    wawi_brain_claude::cupo::skipped(&held, now)
+                }
+                None => "sin cupo de Claude".into(),
+            };
+            return Err(Falla::new(motivo));
+        }
         let mut salida = parse_output(&fin.stdout);
         if fin.timed_out {
             let cost = salida

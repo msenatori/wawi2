@@ -26,6 +26,8 @@ use wawi_stt_parakeet::ParakeetStt;
 use wawi_tts_kokoro::{KokoroTts, SpeechAudio};
 
 use wawi_body::Flash;
+use wawi_brain_claude::cupo;
+use wawi_plugins::avisos;
 use wawi_plugins::{PluginEvent, PluginHost, PluginSink};
 use wawi_tools::{RouteClock, Toolbox, WallClock, clock::describe_now};
 
@@ -422,7 +424,18 @@ impl Host {
         }
     }
 
-    fn core(&mut self, event: Event, now: Instant) {
+    fn core(&mut self, mut event: Event, now: Instant) {
+        // The brain says when the limit resets; the owner hears it in words.
+        if let Event::UsageLimited {
+            resets_in_ms: Some(left),
+            until,
+            ..
+        } = &mut event
+            && until.is_empty()
+        {
+            let at = self.clock.now() + (*left).div_ceil(1000) as i64;
+            *until = wawi_tools::clock::until(&self.clock.local(at), &self.clock.local_now());
+        }
         match &event {
             Event::Tick { .. } => {}
             Event::SpeechStarted => {
@@ -691,6 +704,11 @@ impl Host {
                 self.say(&line);
             }
             Effect::FloorQueued { .. } | Effect::InstinctDecided { .. } => {}
+            Effect::UsageLimit {
+                limited,
+                retry_in_ms,
+                told_owner,
+            } => self.usage_limit(limited, retry_in_ms, told_owner),
             Effect::Diagnostic { reason, .. } => {
                 if let Some(incidents) = &mut self.incidents {
                     let found = match reason {
@@ -739,6 +757,42 @@ impl Host {
                     body.flash(Flash::Error);
                 }
             }
+        }
+    }
+
+    /// The usage limit started or ended. The background services learn it
+    /// from `<home>/cupo.json` (they read it right before calling `claude`);
+    /// when it ends and the owner had been told, a fact asks Wawi to say she
+    /// is back, through the instinct gate. A few small file writes, only
+    /// when the limit changes.
+    fn usage_limit(&mut self, limited: bool, retry_in_ms: u64, told_owner: bool) {
+        self.logs.session(&format!(
+            "usage limit {} (retry in {} s)",
+            if limited { "on" } else { "off" },
+            retry_in_ms / 1000
+        ));
+        let Some(root) = self.home.as_ref().map(|home| home.root().to_path_buf()) else {
+            return;
+        };
+        if limited {
+            let now = cupo::now();
+            let written = cupo::write(
+                &root,
+                &cupo::Cupo {
+                    hasta: now + retry_in_ms.div_ceil(1000),
+                    sabido: self.dialogue.usage_limit_known() == Some(true),
+                    desde: now,
+                    origen: "wawi".into(),
+                },
+            );
+            if let Err(error) = written {
+                self.logs.session(&format!("cupo.json: {error}"));
+            }
+            return;
+        }
+        cupo::clear(&root);
+        if told_owner && let Err(error) = avisos::back_notice(&root, self.clock.as_ref()) {
+            self.logs.session(&format!("aviso de vuelta: {error}"));
         }
     }
 
@@ -806,6 +860,13 @@ fn describe_event(event: &Event) -> String {
         }
         Event::BrainDone { turn } => format!("brain_done turn {}", turn.0),
         Event::BrainFailed { turn, .. } => format!("brain_failed turn {}", turn.0),
+        Event::UsageLimited {
+            turn, resets_in_ms, ..
+        } => format!(
+            "usage_limited turn {:?} resets in {:?} s",
+            turn.map(|t| t.0),
+            resets_in_ms.map(|ms| ms / 1000)
+        ),
         Event::ToolFinished { turn, call_id, .. } => {
             format!("tool_finished turn {} {call_id}", turn.0)
         }
@@ -859,5 +920,10 @@ fn describe_effect(effect: &Effect) -> String {
         Effect::SuggestionAdded { .. } => "suggestion_added".into(),
         Effect::InstinctDecided { id, outcome } => format!("instinct_decided {id} {outcome:?}"),
         Effect::Diagnostic { event, reason } => format!("diagnostic {event}: {reason:?}"),
+        Effect::UsageLimit {
+            limited,
+            retry_in_ms,
+            told_owner,
+        } => format!("usage_limit {limited} retry {retry_in_ms} ms told {told_owner}"),
     }
 }

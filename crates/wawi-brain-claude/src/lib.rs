@@ -11,7 +11,9 @@
 //! Threads: one driver thread owns the process and all turn state; one thread
 //! per process reads stdout, another keeps the tail of stderr. No async.
 
+pub mod cupo;
 mod driver;
+pub mod limit;
 pub mod protocol;
 pub mod speech;
 

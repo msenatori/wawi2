@@ -508,6 +508,20 @@ fn oauth_from_a_suggestion_to_revoked_and_back_out() {
             .is_some_and(|p| p.state == PluginState::Desconectado)
     });
     assert_eq!(store.get("wawi2.plugin.falso", "oauth").unwrap(), None);
+    // The owner hears it once (a notice fact for the inbox), and the
+    // Settings window can read the last failure.
+    let notices: Vec<String> = std::fs::read_dir(world.home.join("cola/hechos/new"))
+        .unwrap()
+        .filter_map(|e| e.ok()?.file_name().into_string().ok())
+        .filter(|name| name.starts_with("aviso-falso-"))
+        .collect();
+    assert_eq!(notices.len(), 1, "{notices:?}");
+    let notice =
+        std::fs::read_to_string(world.home.join("cola/hechos/new").join(&notices[0])).unwrap();
+    assert!(notice.contains("conectá falso"), "{notice}");
+    assert!(notice.contains(r#""origen":"aviso""#), "{notice}");
+    let fallo = wawi_plugins::fallos::leer(&world.home, "falso").unwrap();
+    assert_eq!(fallo.tipo, "permiso");
     world.call("falso__leer", "c4", json!({}));
     match world.outcome("c4") {
         ToolOutcome::Failure(text) => assert!(text.contains("conectá falso"), "{text}"),

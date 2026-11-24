@@ -39,7 +39,7 @@ fn make_worker(home: &Path, config: &Config, log: &Log) -> Worker {
     Worker {
         home: home.to_path_buf(),
         clock: Rc::new(SystemClock::new()),
-        motor: Box::new(ClaudeCli::new(config.nice)),
+        motor: Box::new(ClaudeCli::new(config.nice).con_cupo(home)),
         comandos: Box::new(Cargo {
             target: config.target_dir(home),
             nice: config.nice,

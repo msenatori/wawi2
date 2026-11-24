@@ -18,6 +18,8 @@ license.workspace = true
 [dependencies]
 # The maildir queues (make_queue, valid_id, the queue names) and the log stamp.
 wawi-plugins = { path = "../wawi-plugins" }
+# The usage limit: how the CLI says it and `<home>/cupo.json`.
+wawi-brain-claude = { path = "../wawi-brain-claude" }
 # Civil times, the WallClock trait and FakeClock for tests.
 wawi-tools = { path = "../wawi-tools" }
 serde = { version = "=1.0.229", features = ["derive"] }

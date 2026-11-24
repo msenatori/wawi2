@@ -259,6 +259,7 @@ impl World {
             Effect::StopPlayback
             | Effect::FloorQueued { .. }
             | Effect::SuggestionAdded { .. }
+            | Effect::UsageLimit { .. }
             | Effect::Diagnostic { .. } => {}
         }
     }

@@ -8,6 +8,8 @@
 use serde_json::{Value, json};
 use wawi_core::ToolSpec;
 
+use crate::limit::{self, Limit};
+
 /// Name of the in-process MCP server. Claude sees its tools as
 /// `mcp__wawi__<tool>`.
 pub const SERVER_NAME: &str = "wawi";
@@ -139,11 +141,18 @@ pub enum Incoming {
     Compacted,
     TextDelta(String),
     BlockStop,
-    /// The turn is over, by success, error or interrupt.
+    /// The turn is over, by success, error or interrupt. `limit` when it
+    /// ended on the subscription's usage limit.
     Result {
         is_error: bool,
         reason: String,
+        limit: Option<Limit>,
     },
+    /// An assistant message that wraps the usage-limit refusal.
+    Limit(Limit),
+    /// A `rate_limit_event` saying requests are refused until this Unix
+    /// second.
+    RefusedUntil(u64),
     Other,
 }
 
@@ -196,6 +205,10 @@ pub fn parse_line(line: &str) -> Option<Incoming> {
                 _ => Incoming::Other,
             }
         }
+        "assistant" => limit::from_value(&value).map_or(Incoming::Other, Incoming::Limit),
+        "rate_limit_event" => {
+            limit::refused_until(&value).map_or(Incoming::Other, Incoming::RefusedUntil)
+        }
         "result" => {
             let is_error = value
                 .get("is_error")
@@ -210,7 +223,11 @@ pub fn parse_line(line: &str) -> Option<Incoming> {
                 .or_else(|| text(&value, "result"))
                 .or_else(|| text(&value, "subtype"))
                 .unwrap_or_default();
-            Incoming::Result { is_error, reason }
+            Incoming::Result {
+                is_error,
+                reason,
+                limit: limit::from_value(&value),
+            }
         }
         _ => Incoming::Other,
     })
@@ -240,8 +257,39 @@ mod tests {
             ),
             Some(Incoming::Result {
                 is_error: true,
-                reason: "boom".into()
+                reason: "boom".into(),
+                limit: None,
             })
+        );
+        assert_eq!(
+            parse_line(
+                r#"{"type":"result","subtype":"success","is_error":true,"api_error":"usage_limit_reached","result":"You've hit your limit · resets 6pm"}"#
+            ),
+            Some(Incoming::Result {
+                is_error: true,
+                reason: "You've hit your limit · resets 6pm".into(),
+                limit: Some(Limit { resets_at: None }),
+            })
+        );
+        assert_eq!(
+            parse_line(
+                r#"{"type":"assistant","message":{"content":[{"type":"text","text":"You've hit your limit"}]},"error":"rate_limit","api_error":"usage_limit_reached","api_error_params":{"rate_limit_info":{"status":"rejected","resetsAt":1764007200}},"parent_tool_use_id":null}"#
+            ),
+            Some(Incoming::Limit(Limit {
+                resets_at: Some(1_764_007_200)
+            }))
+        );
+        assert_eq!(
+            parse_line(
+                r#"{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":1764007200}}"#
+            ),
+            Some(Incoming::RefusedUntil(1_764_007_200))
+        );
+        assert_eq!(
+            parse_line(
+                r#"{"type":"assistant","message":{"content":[{"type":"text","text":"hola"}]}}"#
+            ),
+            Some(Incoming::Other)
         );
         assert_eq!(
             parse_line(

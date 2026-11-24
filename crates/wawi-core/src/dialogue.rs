@@ -7,6 +7,7 @@ use crate::event::{
     SpeechId, SpeechKind, ToolCall, ToolOutcome, TurnId,
 };
 use crate::instinct::{GateConfig, InstinctCandidate, InstinctGate};
+use crate::limit::{LimitConfig, LimitLine, UsageLimit};
 use crate::plugin::BrainContext;
 use crate::policy::{self, TurnSource};
 use crate::registry::{Registry, ToolSpec};
@@ -22,6 +23,14 @@ pub struct Phrases {
     pub confirmation_cancelled: String,
     /// Said when all the owner said was an `UnclearTranscript`.
     pub unclear_transcript: String,
+    /// The usage limit, the first time the owner hears of it. `{hasta}` is
+    /// the reset in words ("las 18:00").
+    pub limit_hit: String,
+    /// The same, when the reset time is unknown.
+    pub limit_hit_unknown: String,
+    /// Later owner turns during the same limit.
+    pub limit_still: String,
+    pub limit_still_unknown: String,
 }
 
 impl Default for Phrases {
@@ -32,6 +41,10 @@ impl Default for Phrases {
             confirmation_reask: "No te entendí. ¿Sí o no?".into(),
             confirmation_cancelled: "Listo, no lo hago.".into(),
             unclear_transcript: "No te entendí, ¿me lo repetís?".into(),
+            limit_hit: "Uy, me quedé sin cupo hasta {hasta}. Te aviso cuando vuelva.".into(),
+            limit_hit_unknown: "Uy, me quedé sin cupo por un rato. Te aviso cuando vuelva.".into(),
+            limit_still: "Sigo sin cupo hasta {hasta}, aguantame.".into(),
+            limit_still_unknown: "Sigo sin cupo, aguantame un rato.".into(),
         }
     }
 }
@@ -59,6 +72,8 @@ pub struct Config {
     pub max_open_suggestions: usize,
     /// The rules that decide whether a plugin's instinct becomes speech.
     pub instinct: GateConfig,
+    /// How Wawi waits out the subscription's usage limit.
+    pub limit: LimitConfig,
     pub phrases: Phrases,
 }
 
@@ -75,6 +90,7 @@ impl Default for Config {
             floor_queue_cap: 8,
             max_open_suggestions: 5,
             instinct: GateConfig::default(),
+            limit: LimitConfig::default(),
             phrases: Phrases::default(),
         }
     }
@@ -302,6 +318,10 @@ pub struct Dialogue {
     floor_hold_until_ms: u64,
     suggestions: Suggestions,
     instincts: InstinctGate,
+    limit: UsageLimit,
+    /// The initiative turn started for an instinct, and the candidate's id:
+    /// if the usage limit refuses that turn, the candidate is postponed.
+    instinct_turn: Option<(TurnId, String)>,
 }
 
 impl Dialogue {
@@ -309,6 +329,8 @@ impl Dialogue {
         Self {
             suggestions: Suggestions::new(config.max_open_suggestions),
             instincts: InstinctGate::new(config.instinct.clone()),
+            limit: UsageLimit::new(config.limit.clone()),
+            instinct_turn: None,
             config,
             registry: Registry::default(),
             router: Router::default(),
@@ -368,6 +390,16 @@ impl Dialogue {
         self.instincts.waiting_len()
     }
 
+    /// Whether the subscription's usage limit holds the brain back now.
+    pub fn usage_limited(&self) -> bool {
+        self.limit.is_limited()
+    }
+
+    /// While limited: whether the reset time came from the CLI (not a guess).
+    pub fn usage_limit_known(&self) -> Option<bool> {
+        self.limit.known()
+    }
+
     fn step(&mut self, state: State, event: Event, fx: &mut Vec<Effect>) -> State {
         let name = event.name();
         match event {
@@ -408,6 +440,11 @@ impl Dialogue {
             Event::BrainFailed { turn, reason } if state.brain_turn() == Some(turn) => {
                 self.on_brain_failed(state, turn, reason, fx)
             }
+            Event::UsageLimited {
+                turn,
+                resets_in_ms,
+                until,
+            } => self.on_usage_limited(state, turn, resets_in_ms, &until, fx),
             Event::ToolFinished {
                 turn,
                 call_id,
@@ -434,6 +471,13 @@ impl Dialogue {
             return state;
         }
         self.now_ms = now_ms;
+        if let Some(ended) = self.limit.tick(now_ms) {
+            fx.push(Effect::UsageLimit {
+                limited: false,
+                retry_in_ms: 0,
+                told_owner: ended.told_owner,
+            });
+        }
         if state
             .work()
             .is_some_and(|work| now_ms >= work.turn_deadline_ms)
@@ -657,6 +701,12 @@ impl Dialogue {
             }
             return self.speak_turn(turn, reply, SpeechKind::Route(route), fx);
         }
+        // Out of quota: a short line now instead of a brain that would be
+        // refused. With no known reset, now and then the brain gets a try.
+        if self.limit.is_limited() && !self.limit.owner_may_try(self.now_ms) {
+            let text = self.limit_text();
+            return self.speak_turn(turn, text, SpeechKind::Notice, fx);
+        }
         self.start_brain(turn, text, TurnSource::Owner, fx)
     }
 
@@ -711,6 +761,10 @@ impl Dialogue {
             diagnostic(fx, "initiative", Reason::InitiativeBusy);
             return state;
         }
+        if self.limit.is_limited() {
+            diagnostic(fx, "initiative", Reason::UsageLimited);
+            return state;
+        }
         if text.trim().is_empty() {
             diagnostic(fx, "initiative", Reason::EmptyText);
             return state;
@@ -727,6 +781,17 @@ impl Dialogue {
         candidate: InstinctCandidate,
         fx: &mut Vec<Effect>,
     ) -> State {
+        if let Some(left) = self.limit.left_ms(self.now_ms) {
+            diagnostic(fx, "instinct", Reason::UsageLimited);
+            fx.push(Effect::InstinctDecided {
+                id: candidate.id,
+                outcome: InstinctOutcome::Postponed {
+                    reason: Reason::UsageLimited,
+                    retry_in_ms: left.max(MINUTE_MS),
+                },
+            });
+            return state;
+        }
         let floor_free = self.floor_is_free(&state);
         let id = candidate.id.clone();
         let mut dropped = Vec::new();
@@ -748,7 +813,8 @@ impl Dialogue {
 
     /// Starts the next instinct the gate lets through, as an initiative turn.
     fn release_instinct(&mut self, fx: &mut Vec<Effect>) {
-        if !self.floor_is_free(&self.state) {
+        // Queued ones wait out the usage limit where they are.
+        if !self.floor_is_free(&self.state) || self.limit.is_limited() {
             return;
         }
         let mut dropped = Vec::new();
@@ -760,6 +826,7 @@ impl Dialogue {
                 id: candidate.id.clone(),
                 outcome: InstinctOutcome::Started(turn),
             });
+            self.instinct_turn = Some((turn, candidate.id.clone()));
             self.state =
                 self.start_brain(turn, candidate.instruction(), TurnSource::Initiative, fx);
         }
@@ -1165,6 +1232,7 @@ impl Dialogue {
     }
 
     fn on_brain_done(&mut self, state: State, turn: TurnId, fx: &mut Vec<Effect>) -> State {
+        self.limit.brain_worked();
         match state {
             State::Thinking { work, .. } => {
                 cancel_tools(turn, &work, fx);
@@ -1211,6 +1279,79 @@ impl Dialogue {
         }
         cancel_tools(turn, &work, fx);
         self.fail(work.source, FailureKind::Brain(reason), "brain_failed", fx)
+    }
+
+    /// The usage limit refused the brain. It starts (or restarts) the
+    /// limit whatever turn it names; a running turn ends like a failure,
+    /// and an owner turn hears the limit line instead of the failure one.
+    fn on_usage_limited(
+        &mut self,
+        state: State,
+        turn: Option<TurnId>,
+        resets_in_ms: Option<u64>,
+        until: &str,
+        fx: &mut Vec<Effect>,
+    ) -> State {
+        self.limit.hit(self.now_ms, resets_in_ms, until);
+        let retry_in_ms = self.limit.left_ms(self.now_ms).unwrap_or_default();
+        fx.push(Effect::UsageLimit {
+            limited: true,
+            retry_in_ms,
+            told_owner: false,
+        });
+        // The instinct behind that turn was not said: it waits too.
+        if let Some((started, _)) = &self.instinct_turn
+            && Some(*started) == turn
+            && let Some((_, id)) = self.instinct_turn.take()
+        {
+            fx.push(Effect::InstinctDecided {
+                id,
+                outcome: InstinctOutcome::Postponed {
+                    reason: Reason::UsageLimited,
+                    retry_in_ms: retry_in_ms.max(MINUTE_MS),
+                },
+            });
+        }
+        let Some(turn) = turn.filter(|turn| state.brain_turn() == Some(*turn)) else {
+            return state;
+        };
+        let (work, playing) = match state {
+            State::Thinking { work, .. } => (work, false),
+            State::Speaking {
+                brain: Some(work), ..
+            } => (work, true),
+            State::AwaitingConfirmation { work, playback, .. } => (work, playback.is_some()),
+            other => return other,
+        };
+        if playing {
+            fx.push(Effect::StopPlayback);
+        }
+        cancel_tools(turn, &work, fx);
+        match work.source {
+            TurnSource::Owner => {
+                let text = self.limit_text();
+                self.speak_alone(text, SpeechKind::Notice, fx)
+            }
+            TurnSource::Initiative => {
+                diagnostic(fx, "usage_limited", Reason::UsageLimited);
+                State::Idle
+            }
+        }
+    }
+
+    /// What the owner hears about the limit now: the whole line once, a
+    /// shorter one after.
+    fn limit_text(&mut self) -> String {
+        let phrases = &self.config.phrases;
+        match self.limit.line() {
+            Some(LimitLine::Hit { until }) if until.is_empty() => phrases.limit_hit_unknown.clone(),
+            Some(LimitLine::Hit { until }) => phrases.limit_hit.replace("{hasta}", &until),
+            Some(LimitLine::Still { until }) if until.is_empty() => {
+                phrases.limit_still_unknown.clone()
+            }
+            Some(LimitLine::Still { until }) => phrases.limit_still.replace("{hasta}", &until),
+            None => phrases.brain_failure.clone(),
+        }
     }
 
     /// Owner turns hear what went wrong. Initiative turns end quietly: the owner
@@ -1338,6 +1479,8 @@ impl Dialogue {
         SegmentId(self.last_segment)
     }
 }
+
+const MINUTE_MS: u64 = 60_000;
 
 fn instinct_dropped(dropped: Vec<(String, InstinctOutcome)>, fx: &mut Vec<Effect>) {
     for (id, outcome) in dropped {

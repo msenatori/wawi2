@@ -136,6 +136,7 @@ fn the_cli_gets_the_flags_and_the_brief_on_stdin() {
     let cli = ClaudeCli {
         programa: script.clone(),
         nice: 5,
+        home: None,
     };
     let schema = json!({ "type": "object" });
     let work = dir.join("worktree");

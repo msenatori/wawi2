@@ -100,6 +100,34 @@ fn the_brain_gets_only_text_and_nothing_keeps_the_image() {
 }
 
 #[test]
+fn out_of_claude_quota_she_does_not_look_until_the_reset() {
+    let r = rig("cupo");
+    std::fs::create_dir_all(&r.home).unwrap();
+    let now = *r.now.lock().unwrap() as u64;
+    wawi_brain_claude::cupo::write(
+        &r.home,
+        &wawi_brain_claude::cupo::Cupo {
+            hasta: now + 600,
+            sabido: true,
+            desde: now,
+            origen: "wawi".into(),
+        },
+    )
+    .unwrap();
+    let result = r.server.call("mirar_pantalla", &json!({}));
+    assert_eq!(result["isError"], true);
+    assert!(text(&result).contains("sin cupo"), "{result}");
+    assert_eq!(text(&r.server.call("momento", &json!({}))), "");
+    assert_eq!(r.shots.load(Ordering::SeqCst), 0, "no capture");
+    *r.now.lock().unwrap() += 601;
+    assert_eq!(
+        r.server.call("mirar_pantalla", &json!({}))["isError"],
+        false
+    );
+    let _ = std::fs::remove_dir_all(&r.home);
+}
+
+#[test]
 fn no_permission_a_locked_screen_or_a_pause_means_no_capture() {
     let r = rig("guardas");
     r.senales.lock().unwrap().permiso = false;

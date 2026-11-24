@@ -283,6 +283,39 @@ fn an_error_result_fails_the_turn() {
     );
 }
 
+#[test]
+fn the_usage_limit_is_its_own_event_with_the_reset() {
+    let mut h = Harness::new("limit");
+    h.start(1, "limit 3600", &owner(vec![]));
+    let events = h.until(|_| true);
+    let [
+        Event::UsageLimited {
+            turn,
+            resets_in_ms: Some(left),
+            until,
+        },
+    ] = events.as_slice()
+    else {
+        panic!("{events:?}");
+    };
+    assert_eq!(*turn, Some(TurnId(1)));
+    assert!(until.is_empty(), "the host says it in words");
+    assert!((3_590_000..=3_600_000).contains(left), "{left}");
+    // With no reset given, the core backs off on its own.
+    h.start(2, "limit 0", &owner(vec![]));
+    assert_eq!(
+        h.until(|_| true),
+        vec![Event::UsageLimited {
+            turn: Some(TurnId(2)),
+            resets_in_ms: None,
+            until: String::new(),
+        }]
+    );
+    // And the brain is fine for the next turn.
+    h.start(3, "say Volví.", &owner(vec![]));
+    assert_eq!(h.until_done(3), vec![text(3, "Volví."), done(3)]);
+}
+
 fn memory(soul: &str, facts: &[&str]) -> BrainContext {
     let mut context = owner(vec![]);
     let facts: Vec<String> = facts.iter().map(|fact| format!("- {fact}")).collect();

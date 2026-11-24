@@ -182,6 +182,10 @@ struct Rig {
 
 impl Rig {
     fn new(logs: Logs) -> Self {
+        Self::at_home(logs, None)
+    }
+
+    fn at_home(logs: Logs, home: Option<Home>) -> Self {
         let calls: Calls = Rc::default();
         let (tx, rx) = mpsc::channel();
         let device = Arc::new(Device::default());
@@ -195,7 +199,7 @@ impl Rig {
                 tts: Box::new(FakeTts(calls.clone())),
                 out: Box::new(out),
             },
-            None,
+            home,
             Box::new(console.clone()),
             logs,
         );
@@ -840,4 +844,50 @@ fn a_brain_failure_writes_an_incident_off_the_turn_path() {
         "never what the owner said: {text}"
     );
     let _ = std::fs::remove_dir_all(&home);
+}
+
+/// Out of quota: the owner hears until when, in words, without the brain;
+/// the background services see `cupo.json`; at the reset it goes and a fact
+/// asks her to say she is back.
+#[test]
+fn the_usage_limit_is_said_in_words_shared_with_the_services_and_ends() {
+    let dir = std::env::temp_dir().join(format!("wawi2-host-cupo-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let home = Home::open(&dir).unwrap();
+    let clock = FakeClock::at(Civil::date(2026, 11, 20).at(15, 0, 0), -3);
+    let mut rig = Rig::at_home(Logs::default(), Some(home.clone())).tools_on(Some(home), clock);
+    rig.owner_says(1, "¿qué tengo hoy?");
+    rig.core(Event::UsageLimited {
+        turn: Some(TurnId(1)),
+        resets_in_ms: Some(3_600_000),
+        until: String::new(),
+    });
+    assert_eq!(
+        rig.said().last().unwrap(),
+        "tts say 1 Uy, me quedé sin cupo hasta las 16:00. Te aviso cuando vuelva."
+    );
+    let cupo = wawi_brain_claude::cupo::read(&dir).expect("cupo.json");
+    assert!(cupo.sabido);
+    assert_eq!(cupo.origen, "wawi");
+    assert!(cupo.hasta >= cupo.desde + 3_600);
+    // No incident for autoarreglo: nothing is broken.
+    assert!(
+        !dir.join("cola/incidentes/new").exists()
+            || std::fs::read_dir(dir.join("cola/incidentes/new"))
+                .unwrap()
+                .next()
+                .is_none()
+    );
+    // Past the reset: the file goes and the "I'm back" fact waits for the gate.
+    rig.core(Event::Tick {
+        now_ms: 2 * 3_600_000,
+    });
+    assert!(wawi_brain_claude::cupo::read(&dir).is_none());
+    let back: Vec<String> = std::fs::read_dir(dir.join("cola/hechos/new"))
+        .unwrap()
+        .filter_map(|e| e.ok()?.file_name().into_string().ok())
+        .collect();
+    assert_eq!(back.len(), 1, "{back:?}");
+    assert!(back[0].starts_with("cupo-volvi-"), "{back:?}");
+    let _ = std::fs::remove_dir_all(&dir);
 }

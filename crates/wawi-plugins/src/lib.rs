@@ -30,8 +30,10 @@
 //! short-lived login and probe threads; results come back through a
 //! [`PluginSink`].
 
+pub mod avisos;
 pub mod catalog;
 pub mod control;
+pub mod fallos;
 pub mod feed;
 pub mod inbox;
 pub mod keychain;
@@ -39,6 +41,7 @@ pub mod log;
 pub mod manifest;
 pub mod mcp;
 pub mod oauth;
+pub mod preguntas;
 pub mod schedule;
 pub mod secrets;
 pub mod tool;
@@ -221,6 +224,10 @@ pub struct PluginHost {
     scheduler: Scheduler,
     problems: Vec<String>,
     feed: TurnFeed,
+    /// Questions Wawi asked, until the owner answers or they go unanswered.
+    questions: preguntas::Tracker,
+    /// Plugin downs, to spot a crash loop worth a notice.
+    crashes: avisos::CrashWatch,
     inbox: Option<Inbox>,
     last_inbox_scan: Option<i64>,
     next_push: u64,
@@ -288,6 +295,8 @@ impl PluginHost {
             tools_changed: false,
             problems,
             feed: TurnFeed::default(),
+            questions: preguntas::Tracker::default(),
+            crashes: avisos::CrashWatch::default(),
             inbox,
             last_inbox_scan: None,
             next_push: 0,
@@ -498,6 +507,7 @@ impl PluginHost {
                 running.ready = true;
                 running.settled = true;
                 self.tools_changed = true;
+                self.crashes.up(&plugin);
                 self.waiting.remove(&plugin);
                 self.errors.remove(&plugin);
                 self.publish();
@@ -508,6 +518,7 @@ impl PluginHost {
                 if let Some(running) = self.plugins.iter_mut().find(|p| p.manifest.name == plugin) {
                     running.ready = false;
                     running.settled = true;
+                    self.failed(&plugin, &reason, false);
                     self.errors.insert(plugin, reason);
                 }
                 self.publish();
@@ -517,6 +528,7 @@ impl PluginHost {
                 if let Some(running) = self.plugins.iter_mut().find(|p| p.manifest.name == plugin) {
                     running.ready = false;
                     running.settled = true;
+                    self.failed(&plugin, &reason, true);
                     self.waiting.insert(plugin, reason);
                 }
                 self.publish();
@@ -611,6 +623,40 @@ impl PluginHost {
 
     /// How the owner sees a plugin's name: the suggestion's title, else the
     /// name with a capital.
+    /// A running plugin failed: its last failure is recorded for the
+    /// Settings window, and the owner gets a notice once a day when it needs
+    /// them (signing in again) or keeps crashing. See `avisos.rs`.
+    fn failed(&mut self, plugin: &str, reason: &str, auth: bool) {
+        let clock = self.clock.clone();
+        let now = clock.local_now();
+        let title = self.title(plugin);
+        let (tipo, notice) = if auth {
+            let notice = avisos::auth_is_news(reason).then(|| {
+                format!("{title} se desconectó y necesita que le vuelvas a dar permiso ({reason}). Se arregla diciendo «conectá {plugin}».")
+            });
+            (fallos::Tipo::Permiso, notice)
+        } else if self.crashes.down(plugin, clock.now()) {
+            let notice = format!(
+                "{title} se cae una y otra vez ({reason}). Sigo reintentando sola, pero puede que haya que revisarlo."
+            );
+            (fallos::Tipo::Caidas, Some(notice))
+        } else {
+            (fallos::Tipo::Caida, None)
+        };
+        fallos::registrar(&self.home, plugin, tipo, reason, &now);
+        if let Some(notice) = notice {
+            match avisos::plugin_notice(&self.home, plugin, &notice, clock.as_ref()) {
+                Ok(true) => self
+                    .log
+                    .line(&format!("{plugin}: aviso al dueño ({})", tipo.as_str())),
+                Ok(false) => {}
+                Err(error) => self
+                    .log
+                    .line(&format!("{plugin}: no pude dejar el aviso: {error}")),
+            }
+        }
+    }
+
     fn title(&self, name: &str) -> String {
         if let Some(s) = self.services.suggestions.iter().find(|s| s.name == name) {
             return s.title.clone();
@@ -1252,6 +1298,10 @@ impl PluginHost {
                 events.push(event);
             }
         }
+        let seen = self.questions.tick(epoch);
+        if !seen.is_empty() {
+            self.questions_seen(seen);
+        }
         if self
             .last_inbox_scan
             .is_none_or(|last| epoch - last >= INBOX_EVERY_S || epoch < last)
@@ -1352,7 +1402,7 @@ impl PluginHost {
     pub fn heard(&mut self, text: &str) {
         let now = self.stamp();
         if let Some(item) = self.feed.heard(text, &now) {
-            self.send_feed(item);
+            self.finished(item);
         }
     }
 
@@ -1380,7 +1430,7 @@ impl PluginHost {
     pub fn interrupted(&mut self) {
         let now = self.stamp();
         if let Some(item) = self.feed.interrupted(&now) {
-            self.send_feed(item);
+            self.finished(item);
         }
     }
 
@@ -1388,7 +1438,7 @@ impl PluginHost {
     pub fn idle(&mut self) {
         let now = self.stamp();
         if let Some(item) = self.feed.finish(false, &now) {
-            self.send_feed(item);
+            self.finished(item);
         }
         let civil = self.clock.local_now();
         if let Some(inbox) = self.inbox.as_mut() {
@@ -1401,6 +1451,58 @@ impl PluginHost {
     fn stamp(&self) -> String {
         let now = self.clock.local_now();
         format!("{}:{:02}", now.iso_minute(), now.second)
+    }
+
+    /// A turn is over: questions she asked are followed, and observing
+    /// plugins get it.
+    fn finished(&mut self, item: FeedItem) {
+        let turn = preguntas::Turn {
+            owner: &item.owner,
+            wawi: &item.wawi,
+            interrupted: item.interrupted,
+            initiative: item.initiative,
+        };
+        let seen = self.questions.turn(&turn, self.clock.now());
+        self.questions_seen(seen);
+        self.send_feed(item);
+    }
+
+    /// Unanswered questions become facts; a late answer takes one back.
+    fn questions_seen(&mut self, seen: Vec<preguntas::Seen>) {
+        for seen in seen {
+            match seen {
+                preguntas::Seen::Unanswered(question) => {
+                    let config = self.questions.config();
+                    let fact = avisos::Fact {
+                        id: question.id.clone(),
+                        origin: preguntas::ORIGIN.into(),
+                        say: format!("Le preguntaste al dueño: «{}»", question.question),
+                        context: Some(json!({ "pregunta": question.question })),
+                        urgency: "baja",
+                        not_before: Some(question.not_before(config)),
+                        expires: Some(question.expires(config)),
+                    };
+                    match avisos::drop_fact(&self.home, &fact, self.clock.as_ref()) {
+                        Ok(true) => self
+                            .log
+                            .line(&format!("{}: sin respuesta, para retomar", question.id)),
+                        Ok(false) => {}
+                        Err(error) => self
+                            .log
+                            .line(&format!("{}: no pude guardarla: {error}", question.id)),
+                    }
+                }
+                preguntas::Seen::Answered { id } => {
+                    let now = self.clock.local_now();
+                    if let Some(inbox) = self.inbox.as_mut()
+                        && inbox.answered(&id, now)
+                    {
+                        self.log
+                            .line(&format!("{id}: respondida tarde, no se retoma"));
+                    }
+                }
+            }
+        }
     }
 
     /// Queues the item for every observing plugin and wakes its worker.

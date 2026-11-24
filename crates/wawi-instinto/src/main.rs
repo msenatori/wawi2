@@ -31,7 +31,7 @@ fn make_worker(home: &Path, config: &Config, log: &Log) -> Worker {
         clock: Rc::new(SystemClock::new()),
         fuentes: Registro::base(),
         juez: Box::new(ModeloJuez {
-            modelo: ClaudeCli::new(&claude_dir(home)),
+            modelo: ClaudeCli::new(&claude_dir(home)).con_cupo(home, "instinto"),
             por_defecto: config.juzgar.modelo.clone(),
             max_dia: config.juzgar.max_dia,
             cupo: home.join("instinto/juez-cupo.json"),
@@ -79,7 +79,9 @@ fn main() -> ExitCode {
                         Observador::new(
                             &home,
                             cfg,
-                            Box::new(ClaudeCli::new(&claude_dir(&home))),
+                            Box::new(
+                                ClaudeCli::new(&claude_dir(&home)).con_cupo(&home, "instinto"),
+                            ),
                             Rc::new(SystemClock::new()),
                             log2,
                         )

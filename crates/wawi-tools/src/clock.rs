@@ -302,6 +302,16 @@ pub fn when(time: &Civil, now: &Civil) -> String {
     }
 }
 
+/// Until when, said after «hasta»: `las 18:00` today, `la 1:05`, `mañana
+/// a las 8:00`, `el jueves 26 de noviembre a las 9:00`.
+pub fn until(time: &Civil, now: &Civil) -> String {
+    if time.days() == now.days() {
+        at_time(time).trim_start_matches("a ").to_owned()
+    } else {
+        when(time, now)
+    }
+}
+
 /// A length of time in words, with its two largest units: `1 minuto`,
 /// `1 hora y 5 minutos`, `45 segundos`, `2 días y 3 horas`.
 pub fn duration(seconds: i64) -> String {
@@ -387,6 +397,16 @@ mod tests {
         ] {
             assert_eq!(parse_local(bad), None, "{bad}");
         }
+    }
+
+    #[test]
+    fn until_reads_after_hasta() {
+        let now = friday();
+        let at = |d: u8, h: u8, m: u8| Civil::date(2026, 11, d).at(h, m, 0);
+        assert_eq!(until(&at(20, 18, 0), &now), "las 18:00");
+        assert_eq!(until(&at(20, 1, 5), &now), "la 1:05");
+        assert_eq!(until(&at(21, 8, 0), &now), "mañana a las 8:00");
+        assert!(until(&at(26, 9, 0), &now).starts_with("el jueves 26 de noviembre"));
     }
 
     #[test]

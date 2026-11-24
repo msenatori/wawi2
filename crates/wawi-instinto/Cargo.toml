@@ -15,6 +15,8 @@ license.workspace = true
 wawi-core = { path = "../wawi-core" }
 # Manifest loading, the MCP client and secrets, reused for `mcp` sources.
 wawi-plugins = { path = "../wawi-plugins" }
+# The usage limit: how the CLI says it and `<home>/cupo.json`.
+wawi-brain-claude = { path = "../wawi-brain-claude" }
 # Civil times, the WallClock trait and FakeClock for tests.
 wawi-tools = { path = "../wawi-tools" }
 serde = { version = "=1.0.229", features = ["derive"] }

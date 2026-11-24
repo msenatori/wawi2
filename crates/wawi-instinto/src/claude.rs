@@ -12,6 +12,7 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
+use wawi_brain_claude::cupo;
 
 pub struct Pedido<'a> {
     pub modelo: &'a str,
@@ -39,6 +40,9 @@ pub struct ClaudeCli {
     pub programa: PathBuf,
     /// The folder it runs in: empty, so no project file is near.
     pub dir: PathBuf,
+    /// Wawi's home and who is calling, to honor and note the usage limit
+    /// (`<home>/cupo.json`). `None`: no check (the benches).
+    pub cupo: Option<(PathBuf, String)>,
 }
 
 impl ClaudeCli {
@@ -46,7 +50,16 @@ impl ClaudeCli {
         Self {
             programa: default_program(),
             dir: dir.to_path_buf(),
+            cupo: None,
         }
+    }
+
+    /// While `<home>/cupo.json` says the subscription is out of quota, no
+    /// call is made (it fails at once, saying so); a call that runs into the
+    /// limit writes it, so every other service waits too.
+    pub fn con_cupo(mut self, home: &Path, origen: &str) -> Self {
+        self.cupo = Some((home.to_path_buf(), origen.to_owned()));
+        self
     }
 }
 
@@ -106,6 +119,11 @@ fn inherited(key: &str) -> bool {
 
 impl Modelo for ClaudeCli {
     fn preguntar(&self, pedido: &Pedido<'_>) -> Result<Respuesta, String> {
+        if let Some((home, _)) = &self.cupo
+            && let Some(held) = cupo::active(home, cupo::now())
+        {
+            return Err(cupo::skipped(&held, cupo::now()));
+        }
         let started = Instant::now();
         std::fs::create_dir_all(&self.dir).map_err(|e| format!("no pude crear la carpeta: {e}"))?;
         let mut command = Command::new(&self.programa);
@@ -146,6 +164,12 @@ impl Modelo for ClaudeCli {
             }
         }
         let text = reader.join().unwrap_or_default();
+        if let Some((home, origen)) = &self.cupo
+            && let Some(limit) = cupo::in_output(&text)
+        {
+            let held = cupo::note(home, limit, cupo::now(), origen);
+            return Err(cupo::skipped(&held, cupo::now()));
+        }
         let mut respuesta = parse_output(&text)?;
         respuesta.ms = started.elapsed().as_millis();
         Ok(respuesta)
